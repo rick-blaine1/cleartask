@@ -1,3 +1,2 @@
 # Project Documentation Rules (Non-Obvious Only)
-
-This is a new project, and the codebase has not been initialized yet. Therefore, there are no project-specific rules for Documentation to document at this time. Once the codebase is introduced, this file will be updated with relevant, non-obvious information discovered through file analysis.
+- After Google login, the frontend currently displays mock task data. The JWT token received from the backend upon successful authentication is not yet consumed or used to fetch real tasks.

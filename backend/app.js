@@ -21,7 +21,7 @@ function buildApp() {
       auth: fastifyOAuth2.GOOGLE_CONFIGURATION
     },
     startRedirectPath: '/api/auth/google',
-    callbackUri: '/api/auth/google/callback',
+    callbackUri: `${process.env.BASE_URL || 'http://localhost:3000'}/api/auth/google/callback`,
   });
 
   const { Pool } = pg;
