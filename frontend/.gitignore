@@ -8,30 +8,9 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
-**/node_modules
 dist
 dist-ssr
 *.local
-
-# Environment variables
-.env
-.env.local
-.env.test
-.env.*.local
-
-# Test files with sensitive data
-**/tests/**/*.secret.*
-**/tests/**/*.credentials.*
-**/*.test.local.*
-
-# Temporary/accidental files
-f
-fr
-fron
--p/
-
-# Docker
-.dockerignore
 
 # Editor directories and files
 .vscode/*

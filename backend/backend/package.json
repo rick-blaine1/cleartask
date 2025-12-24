@@ -1,0 +1,6 @@
+{
+  "devDependencies": {
+    "nodemon": "^3.1.11",
+    "tap": "^21.5.0"
+  }
+}

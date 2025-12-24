@@ -1,0 +1,25 @@
+{
+  "name": "backend",
+  "version": "1.0.0",
+  "description": "Fastify backend for ClearTask",
+  "type": "module",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js",
+    "dev": "nodemon app.js",
+    "test": "cross-env NODE_ENV=test node --test"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@fastify/jwt": "^10.0.0",
+    "@fastify/oauth2": "^8.1.2",
+    "fastify": "^5.0.0",
+    "pg": "^8.11.3"
+  },
+  "devDependencies": {
+    "cross-env": "^10.1.0",
+    "nodemon": "^3.1.0"
+  }
+}
