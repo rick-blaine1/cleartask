@@ -26,7 +26,11 @@ services:
       - ./backend:/app
       - /app/node_modules
     environment:
-      - DATABASE_URL=postgresql://user:password@db:5432/cleartaskdb
+      - DB_USER=user
+      - DB_HOST=db
+      - DB_NAME=cleartaskdb
+      - DB_PASSWORD=password
+      - DB_PORT=5432
       - JWT_SECRET=supersecretjwtkey
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}

@@ -25,13 +25,11 @@ dist-ssr
 **/*.test.local.*
 
 # Temporary/accidental files
-f
-fr
-fron
--p/
-
 # Docker
 .dockerignore
+
+# Agent files
+.roo/
 
 # Editor directories and files
 .vscode/*

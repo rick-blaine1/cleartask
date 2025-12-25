@@ -27,6 +27,8 @@ This project is a monorepo containing a React frontend (Vite, TypeScript, Dexie.
 - `DB_NAME`: Defaults to `cleartaskdb`.
 - `DB_PASSWORD`: Defaults to `password`.
 - `DB_PORT`: Defaults to `5432`.
+- `BASE_URL`: Defaults to `http://localhost:3000`. Used to construct the full `callbackUri` for Google OAuth.
+- `FRONTEND_URL`: Defaults to `http://localhost:5173`. Used for CORS and OAuth redirection.
 
 ### Frontend (`docker-compose.yml`)
 - `VITE_APP_API_BASE_URL`: Defaults to `http://localhost:3000`.
@@ -34,17 +36,21 @@ This project is a monorepo containing a React frontend (Vite, TypeScript, Dexie.
 ### Shared (Google OAuth2)
 - `GOOGLE_CLIENT_ID`: Used by both frontend (as `VITE_GOOGLE_CLIENT_ID`) and backend.
 - `GOOGLE_CLIENT_SECRET`: Used by backend.
+- `OPENAI_API_KEY`: Used by the backend to enable OpenAI API calls. If not provided, a fallback suggestion is used.
 
 ## Project-Specific Code Style/Patterns (Non-Obvious)
 
 ### Frontend
-- **IndexedDB Usage:** Tasks are managed client-side using Dexie.js (`frontend/src/db.ts`).
-- **TypeScript Strictness:** High strictness enforced in `frontend/tsconfig.app.json` including `noUnusedLocals`, `noUnusedParameters`, `noFallthroughCasesInSwitch`, and `noUncheckedSideEffectImports`.
-- **Module Syntax:** `verbatimModuleSyntax: true` is set in `frontend/tsconfig.app.json`.
+- **IndexedDB Usage:** Tasks are managed client-side using Dexie.js ([`frontend/src/db.ts`](frontend/src/db.ts)).
+- **TypeScript Strictness:** High strictness enforced in [`frontend/tsconfig.app.json`](frontend/tsconfig.app.json) including `noUnusedLocals`, `noUnusedParameters`, `noFallthroughCasesInSwitch`, and `noUncheckedSideEffectImports`.
+- **Module Syntax:** `verbatimModuleSyntax: true` is set in [`frontend/tsconfig.app.json`](frontend/tsconfig.app.json).
 
 ### Backend
-- **Database Access:** Direct `pg` pool usage with parameterized queries (`backend/app.js`).
+- **Database Access:** Direct `pg` pool usage with parameterized queries ([`backend/app.js`](backend/app.js)).
 - **Authentication:** JWT and Google OAuth2 (`@fastify/jwt`, `@fastify/oauth2`) are used for authentication.
+  - The backend generates its own JWT after successful Google OAuth, signed with `JWT_SECRET` and containing `userId`.
+  - Google's raw access token is NOT used directly by the frontend.
+- **CORS:** Implemented using `@fastify/cors` to allow requests from the frontend, configurable via `FRONTEND_URL`.
 
 ## Testing Setup (Non-Obvious)
 
