@@ -28,8 +28,31 @@ dist-ssr
 # Docker
 .dockerignore
 
-# Agent files
-.roo/
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Build artifacts
+build/
+*.tsbuildinfo
+
+# Coverage reports
+coverage/
+.nyc_output/
+
+# OS files
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+
+# Agent files (commented out to keep AGENTS.md files)
+# .roo/
 
 # Editor directories and files
 .vscode/*
