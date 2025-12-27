@@ -45,6 +45,12 @@ function buildApp() {
     apiKey: process.env.OPENAI_API_KEY,
   }) : null;
 
+  // Initialize Requesty client only if API key is provided
+  const requesty = process.env.REQUESTY_API_KEY ? new OpenAI({
+    apiKey: process.env.REQUESTY_API_KEY,
+    baseURL: "https://router.requesty.ai/v1",
+  }) : null;
+
   fastify.decorate("authenticate", async function (request, reply) {
     try {
       await request.jwtVerify();
@@ -89,6 +95,124 @@ function buildApp() {
     } catch (error) {
       fastify.log.error('OAuth callback error:', error);
       reply.status(500).send({ error: 'OAuth callback failed' });
+    }
+  });
+
+  fastify.post('/api/tasks/create-from-voice', { onRequest: [fastify.authenticate] }, async (request, reply) => {
+    try {
+      const { transcribedText, clientDate, clientTimezoneOffset } = request.body;
+
+      if (!transcribedText) {
+        return reply.status(400).send({ error: 'Transcribed text is required.' });
+      }
+
+      let taskDetails = null;
+      let llmUsed = 'None';
+      const clientCurrentDate = new Date(clientDate);
+      clientCurrentDate.setMinutes(clientCurrentDate.getMinutes() - clientTimezoneOffset);
+      const currentTimeForLLM = clientCurrentDate.toISOString().split('T')[0];
+
+      const prompt = `Think Hard about this.
+      # ROLE 
+      You are a world class personal assistant. If presented with an incomplete time, assume that it is in the current year and relative to today.
+
+      # CONTEXT
+      Today is ${currentTimeForLLM}
+
+      # TASK
+      Parse the following transcribed text into a JSON object with fields: task_name (string), due_date (string, YYYY-MM-DD or null), is_completed (boolean), original_request (string).
+      Transcribed text: "${transcribedText}"
+      Example:
+      {
+        "task_name": "Buy groceries",
+        "due_date": "2025-12-31",
+        "is_completed": false,
+        "original_request": "I need to buy groceries by the end of the year."
+      }`;
+
+      const callLLM = async (llmClient, modelName, timeoutMs) => {
+        const timeoutPromise = new Promise((resolve, reject) => {
+          setTimeout(() => {
+            reject(new Error(`${modelName} API call for task parsing timed out after ${timeoutMs / 1000} seconds`));
+          }, timeoutMs);
+        });
+
+        const llmCallPromise = llmClient.chat.completions.create({
+          model: modelName,
+          messages: [{
+            role: "user",
+            content: prompt
+          }],
+          response_format: { type: "json_object" },
+        });
+
+        const response = await Promise.race([llmCallPromise, timeoutPromise]);
+        return JSON.parse(response.choices[0].message.content);
+      };
+
+      // Try Requesty first
+      if (requesty) {
+        try {
+          taskDetails = await callLLM(requesty, "openai/gpt-4o-mini", 5000);
+          llmUsed = 'Requesty';
+          fastify.log.info('Task parsed successfully using Requesty.');
+        } catch (requestyError) {
+          fastify.log.warn('Requesty failed or timed out, falling back to OpenAI:', requestyError.message);
+          // Fallback to OpenAI if Requesty fails
+          if (openai) {
+            try {
+              taskDetails = await callLLM(openai, "gpt-4o-mini", 3000);
+              llmUsed = 'OpenAI';
+              fastify.log.info('Task parsed successfully using OpenAI fallback.');
+            } catch (openaiError) {
+              fastify.log.error('OpenAI fallback also failed:', openaiError.message);
+            }
+          }
+        }
+      } else if (openai) {
+        // If Requesty is not configured, try OpenAI directly
+        try {
+          taskDetails = await callLLM(openai, "gpt-3.5-turbo", 3000);
+          llmUsed = 'OpenAI';
+          fastify.log.info('Task parsed successfully using OpenAI.');
+        } catch (openaiError) {
+          fastify.log.error('OpenAI API call failed:', openaiError.message);
+        }
+      }
+
+      // If both fail or are not configured, use a simple fallback
+      if (!taskDetails) {
+        fastify.log.warn('No LLM configured or all LLMs failed, using simple fallback for task parsing.');
+        taskDetails = {
+          task_name: transcribedText,
+          due_date: null,
+          is_completed: false,
+          original_request: transcribedText,
+        };
+        llmUsed = 'Fallback';
+      }
+
+      fastify.log.info(`LLM used for task parsing: ${llmUsed}`);
+      fastify.log.info(`Task details to be inserted: ${JSON.stringify(taskDetails)}`);
+
+      const client = await pool.connect();
+      try {
+        const insertResult = await client.query(
+          'INSERT INTO tasks (id, user_id, task_name, due_date, is_completed, original_request) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5) RETURNING id, task_name, due_date, is_completed, original_request',
+          [request.user.id, taskDetails.task_name, taskDetails.due_date, taskDetails.is_completed, taskDetails.original_request]
+        );
+        client.release();
+        reply.status(201).send(insertResult.rows[0]);
+      } catch (dbError) {
+        client.release();
+        fastify.log.error('Database error during task insertion:', dbError);
+        throw dbError; // Re-throw to be caught by outer catch
+      }
+
+    } catch (error) {
+      fastify.log.error('Error creating task from voice:', error);
+      fastify.log.error('Error stack:', error.stack);
+      reply.status(500).send({ error: 'Failed to create task from voice.', details: error.message });
     }
   });
 

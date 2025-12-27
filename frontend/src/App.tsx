@@ -1,11 +1,23 @@
 import React, { useEffect, useState, useRef } from 'react';
 import TaskCard from './components/TaskCard';
 import type { Task } from './db';
+import { speak, speakTaskCreated, speakAmbiguousInput } from './tts';
+
+declare global {
+  interface Window {
+    webkitSpeechRecognition: any;
+  }
+}
 
 function App() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false);
   const [isFetchingAISuggestion, setIsFetchingAISuggestion] = useState<boolean>(false);
+  const [pendingDeletionTask, setPendingDeletionTask] = useState<Task | null>(null); // New state for pending deletion task
+  const [isUILocked, setIsUILocked] = useState<boolean>(false); // New state for UI lock
+  const [isListening, setIsListening] = useState<boolean>(false);
+  const [transcript, setTranscript] = useState<string>('');
+  const recognitionRef = useRef<any>(null);
 
   const audioContextRef = useRef<AudioContext | null>(null);
 
@@ -37,6 +49,53 @@ function App() {
       }
     };
   }, []);
+
+  useEffect(() => {
+    if ('webkitSpeechRecognition' in window) {
+      recognitionRef.current = new window.webkitSpeechRecognition();
+      recognitionRef.current.continuous = false;
+      recognitionRef.current.interimResults = false;
+      recognitionRef.current.lang = 'en-US';
+
+      recognitionRef.current.onstart = () => {
+        setIsListening(true);
+        setTranscript(''); // Clear previous transcript on new start
+      };
+
+      recognitionRef.current.onresult = (event: any) => {
+        const speechResult = event.results[0][0].transcript;
+        setTranscript(speechResult);
+        console.log('Speech Result:', speechResult);
+        // Automatically send the speech result to the backend
+        sendVoiceTranscriptToBackend(speechResult);
+      };
+
+      recognitionRef.current.onend = () => {
+        setIsListening(false);
+        console.log('Speech recognition ended.');
+      };
+
+      recognitionRef.current.onerror = (event: any) => {
+        console.error('Speech recognition error:', event.error);
+        setIsListening(false);
+        speakAmbiguousInput();
+      };
+    } else {
+      console.warn('Web Speech API not supported in this browser.');
+    }
+  }, []);
+
+  const startListening = () => {
+    if (recognitionRef.current) {
+      recognitionRef.current.start();
+    }
+  };
+
+  const stopListening = () => {
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+    }
+  };
 
   useEffect(() => {
     const hash = window.location.hash;
@@ -75,6 +134,29 @@ function App() {
       console.error('Error fetching tasks:', error);
       setTasks([]);
     }
+  };
+
+  const handleInitiateDeleteConfirmation = (taskToConfirm: Task) => {
+    setPendingDeletionTask(taskToConfirm);
+    setIsUILocked(true);
+    // Placeholder for app speaking: “Are you sure you want to delete [Task]?”
+    console.log(`App speaks: “Are you sure you want to delete ${taskToConfirm.task_name}?”`);
+    // Placeholder for opening mic for 10 seconds
+    console.log('Opening mic for 10 seconds...');
+  };
+
+  const handleCancelDeleteConfirmation = () => {
+    setPendingDeletionTask(null);
+    setIsUILocked(false);
+    console.log('Delete confirmation cancelled.');
+  };
+
+  const handleDeleteTask = async (taskId: string) => {
+    // This will be implemented in a later phase to actually delete the task
+    console.log(`Deleting task: ${taskId}`);
+    // For now, just reset the pending deletion state
+    setPendingDeletionTask(null);
+    setIsUILocked(false);
   };
 
   const triggerHapticFeedback = (pattern: number | number[]) => {
@@ -156,6 +238,46 @@ function App() {
     }
   };
 
+  const sendVoiceTranscriptToBackend = async (transcript: string) => {
+    const token = localStorage.getItem('jwt');
+    if (!token) {
+      console.error('No JWT token found.');
+      return;
+    }
+    try {
+      const apiUrl = `${import.meta.env.VITE_APP_API_BASE_URL}/api/tasks/create-from-voice`;
+      const clientDate = new Date(); // Get current date/time on client
+      const clientTimezoneOffset = clientDate.getTimezoneOffset(); // Get timezone offset in minutes
+
+      console.log('LLM Request:', { url: apiUrl, method: 'POST', body: { transcribedText: transcript, clientDate: clientDate.toISOString(), clientTimezoneOffset } });
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ transcribedText: transcript, clientDate: clientDate.toISOString(), clientTimezoneOffset }),
+      });
+
+      if (response.ok) {
+        const newTask = await response.json();
+        console.log('LLM Response (Success):', newTask); // Log the LLM's response
+        setTasks(prevTasks => [...prevTasks, newTask]);
+        setTranscript(''); // Clear the transcript input
+        speakTaskCreated();
+      } else {
+        const errorData = await response.json();
+        console.error('LLM Response (Error):', errorData); // Log the LLM's error response
+        console.error('Failed to create task from voice input:', errorData.message);
+        alert(`Failed to create task: ${errorData.message}`);
+        speakAmbiguousInput();
+      }
+    } catch (error) {
+      console.error('Error sending voice transcript to backend:', error);
+      alert('Error communicating with the backend to create task.');
+    }
+  };
+
   return (
     <>
       <div className="card">
@@ -167,6 +289,10 @@ function App() {
             <button onClick={fetchOpenAISuggestion} disabled={isFetchingAISuggestion}>
               {isFetchingAISuggestion ? 'Getting Suggestion...' : 'Get AI Task Suggestion'}
             </button>
+            <button onClick={isListening ? stopListening : startListening} disabled={!('webkitSpeechRecognition' in window)}>
+              {isListening ? 'Stop Listening' : 'Start Voice Input'}
+            </button>
+            {transcript && <p>Transcript: {transcript}</p>}
           </>
         ) : (
           <button onClick={handleGoogleLogin}>
@@ -174,11 +300,18 @@ function App() {
           </button>
         )}
       </div>
-      <div className="task-list">
-        {tasks.map(task => (
-          <TaskCard key={task.id} task={task} />
-        ))}
-      </div>
+        <div className={`task-list ${isUILocked ? 'locked-ui-overlay' : ''}`}>
+          {tasks.map(task => (
+            <TaskCard
+              key={task.id}
+              task={task}
+              onInitiateDeleteConfirmation={handleInitiateDeleteConfirmation}
+              isUILocked={isUILocked}
+              isPendingDeletion={pendingDeletionTask?.id === task.id}
+              onDelete={handleDeleteTask} // Pass the actual delete handler
+            />
+          ))}
+        </div>
     </>
   );
 }

@@ -34,6 +34,8 @@ services:
       - JWT_SECRET=supersecretjwtkey
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - OPENAI_API_KEY=YOUR_OPENAI_API_KEY_HERE
+      - REQUESTY_API_KEY=${REQUESTY_API_KEY} # Optional: for Requesty.ai integration
     depends_on:
       - db
 

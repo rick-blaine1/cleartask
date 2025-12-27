@@ -40,3 +40,12 @@
 .read-the-docs {
   color: #888;
 }
+
+.task-card.pending-delete {
+  border: 2px solid #FFF000; /* Electric Yellow */
+}
+
+.locked-ui-overlay {
+  pointer-events: none; /* Disable all pointer events on children */
+  opacity: 0.5; /* Visually indicate locked state */
+}
