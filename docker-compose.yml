@@ -45,8 +45,8 @@ services:
       - "5432:5432"
     environment:
       POSTGRES_DB: cleartaskdb
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: password
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - db_data:/var/lib/postgresql/data
 
