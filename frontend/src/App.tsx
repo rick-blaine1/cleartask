@@ -12,7 +12,6 @@ declare global {
 function App() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false);
-  const [isFetchingAISuggestion, setIsFetchingAISuggestion] = useState<boolean>(false);
   const [pendingDeletionTask, setPendingDeletionTask] = useState<Task | null>(null); // New state for pending deletion task
   const [isUILocked, setIsUILocked] = useState<boolean>(false); // New state for UI lock
   const [isListening, setIsListening] = useState<boolean>(false);
@@ -230,35 +229,6 @@ function App() {
     setTasks([]);
   };
 
-  const fetchOpenAISuggestion = async () => {
-    const token = localStorage.getItem('jwt');
-    if (!token) {
-      console.error('No JWT token found.');
-      return;
-    }
-    setIsFetchingAISuggestion(true);
-    try {
-      const response = await fetch(`${import.meta.env.VITE_APP_API_BASE_URL}/api/openai-task-suggestion`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-      });
-      if (response.ok) {
-        const data = await response.json();
-        alert(`AI Suggested Task: ${data.suggestion}`);
-      } else {
-        console.error('Failed to fetch AI suggestion', response.statusText);
-        alert('Failed to get AI task suggestion. Please try again later.');
-      }
-    } catch (error) {
-      console.error('Error fetching AI suggestion:', error);
-      alert('Failed to get AI task suggestion. Please try again later.');
-    } finally {
-      setIsFetchingAISuggestion(false);
-    }
-  };
-
   const sendVoiceTranscriptToBackend = async (transcript: string) => {
     const token = localStorage.getItem('jwt');
     if (!token) {
@@ -307,9 +277,6 @@ function App() {
             <button onClick={handleGoogleLogout}>
               Logout
             </button>
-            <button onClick={fetchOpenAISuggestion} disabled={isFetchingAISuggestion}>
-              {isFetchingAISuggestion ? 'Getting Suggestion...' : 'Get AI Task Suggestion'}
-            </button>
             <button onClick={isListening ? stopListening : startListening} disabled={!('webkitSpeechRecognition' in window)}>
               {isListening ? 'Stop Listening' : 'Start Voice Input'}
             </button>
@@ -327,6 +294,7 @@ function App() {
               key={task.id}
               task={task}
               onInitiateDeleteConfirmation={handleInitiateDeleteConfirmation}
+              onCancelDelete={handleCancelDeleteConfirmation}
               isUILocked={isUILocked}
               isPendingDeletion={pendingDeletionTask?.id === task.id}
               onDelete={handleDeleteTask} // Pass the actual delete handler

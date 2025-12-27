@@ -8,6 +8,7 @@ interface TaskCardProps {
   onEdit?: (taskId: string) => void;
   onDelete?: (taskId: string) => void;
   onInitiateDeleteConfirmation: (task: Task) => void; // New prop for delete confirmation
+  onCancelDelete: () => void; // New prop for canceling delete confirmation
   isUILocked: boolean; // New prop to indicate if UI is locked
   isPendingDeletion: boolean; // New prop to indicate if this specific task is pending deletion
 }
@@ -18,6 +19,7 @@ const TaskCard: React.FC<TaskCardProps> = ({
   onEdit,
   onDelete,
   onInitiateDeleteConfirmation,
+  onCancelDelete,
   isUILocked,
   isPendingDeletion
 }) => {
@@ -40,11 +42,7 @@ const TaskCard: React.FC<TaskCardProps> = ({
   };
 
   const handleCancelDelete = () => {
-    // This should ideally be handled by App.tsx to reset the pending deletion state
-    // For now, it's a placeholder.
-    if (onDelete) { // Using onDelete as a proxy for a cancel action on the parent
-        onDelete(task.id!); // This is a temporary solution for the onDelete prop
-    }
+    onCancelDelete();
   };
 
   const handleToggleComplete = () => {
