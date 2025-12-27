@@ -28,7 +28,8 @@ function buildApp() {
 
   fastify.register(cors, {
     origin: process.env.FRONTEND_URL || 'http://localhost:5173',
-    credentials: true
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
   });
 
   const { Pool } = pg;
@@ -39,6 +40,9 @@ function buildApp() {
     password: process.env.DB_PASSWORD || 'password',
     port: process.env.DB_PORT || 5432,
   });
+
+  // Expose pool for initialization
+  fastify.decorate('pool', pool);
 
   // Initialize OpenAI client only if API key is provided
   const openai = process.env.OPENAI_API_KEY ? new OpenAI({
@@ -86,11 +90,41 @@ function buildApp() {
   fastify.get('/api/auth/google/callback', async function (request, reply) {
     try {
       const { token } = await this.googleOAuth2.getAccessTokenFromAuthorizationCodeFlow(request);
-      // For simplicity, we'll assume the Google token is valid and extract some user info
-      // In a real app, you would validate this token with Google and fetch user profile.
-      const userProfile = { id: 'google-user-' + Math.random().toString(36).substring(7), email: 'test@example.com' }; // Mock user profile
+      
+      // Fetch the user's Google profile using the access token
+      const userInfoResponse = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+        headers: {
+          Authorization: `Bearer ${token.access_token}`,
+        },
+      });
 
-      const ourJwt = fastify.jwt.sign({ userId: userProfile.id });
+      if (!userInfoResponse.ok) {
+        throw new Error('Failed to fetch user info from Google');
+      }
+
+      const googleUserProfile = await userInfoResponse.json();
+      
+      // Use the Google user's unique ID as the user ID
+      const userId = `google-${googleUserProfile.id}`;
+      
+      // Optionally, store or update user information in the database
+      const client = await pool.connect();
+      try {
+        await client.query(
+          `INSERT INTO users (id, email, name)
+           VALUES ($1, $2, $3)
+           ON CONFLICT (id) DO UPDATE
+           SET email = EXCLUDED.email, name = EXCLUDED.name`,
+          [userId, googleUserProfile.email, googleUserProfile.name]
+        );
+      } catch (dbError) {
+        fastify.log.error('Error storing user info:', dbError);
+        // Continue even if user storage fails
+      } finally {
+        client.release();
+      }
+
+      const ourJwt = fastify.jwt.sign({ userId });
       reply.redirect(`${process.env.FRONTEND_URL || 'http://localhost:5173'}/#token=${ourJwt}`);
     } catch (error) {
       fastify.log.error('OAuth callback error:', error);
@@ -253,12 +287,75 @@ function buildApp() {
     }
   });
 
+  fastify.delete('/api/tasks/:id', { onRequest: [fastify.authenticate] }, async (request, reply) => {
+    try {
+      const { id } = request.params;
+      const client = await pool.connect();
+      const result = await client.query(
+        'DELETE FROM tasks WHERE id = $1 AND user_id = $2 RETURNING id',
+        [id, request.user.id]
+      );
+      client.release();
+
+      if (result.rowCount === 0) {
+        reply.status(404).send({ error: 'Task not found or user not authorized.' });
+      } else {
+        reply.status(204).send(); // No Content
+      }
+    } catch (err) {
+      fastify.log.error(err);
+      reply.status(500).send({ error: 'Internal Server Error' });
+    }
+  });
+
   return fastify;
 }
 
 if (process.env.NODE_ENV !== 'test') {
   const start = async () => {
     const app = buildApp();
+    
+    // Wait for database initialization before starting the server
+    try {
+      const client = await app.pool.connect();
+      try {
+        // Create users table
+        await client.query(`
+          CREATE TABLE IF NOT EXISTS users (
+            id VARCHAR(255) PRIMARY KEY,
+            email VARCHAR(255) NOT NULL,
+            name VARCHAR(255),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          );
+          CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+        `);
+
+        // Create tasks table
+        await client.query(`
+          CREATE TABLE IF NOT EXISTS tasks (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            user_id VARCHAR(255) NOT NULL,
+            task_name TEXT NOT NULL,
+            due_date DATE,
+            is_completed BOOLEAN DEFAULT FALSE,
+            original_request TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          );
+          CREATE INDEX IF NOT EXISTS idx_tasks_user_id ON tasks(user_id);
+          CREATE INDEX IF NOT EXISTS idx_tasks_due_date ON tasks(due_date);
+        `);
+
+        app.log.info('Database schema initialized successfully');
+      } finally {
+        client.release();
+      }
+    } catch (error) {
+      app.log.error('Error initializing database schema:', error);
+      process.exit(1);
+    }
+    
     try {
       await app.listen({ port: 3000, host: '0.0.0.0' });
     } catch (err) {

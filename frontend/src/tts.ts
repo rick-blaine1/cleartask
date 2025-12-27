@@ -75,3 +75,11 @@ export function isSpeaking(): boolean {
   }
   return false;
 }
+
+/**
+ * Speaks a confirmation prompt for task deletion.
+ * @param taskName - The name of the task to be deleted.
+ */
+export function speakDeleteConfirmationPrompt(taskName: string): void {
+  speak(`Are you sure you want to delete the task, ${taskName}? Say yes to confirm or no to cancel.`);
+}

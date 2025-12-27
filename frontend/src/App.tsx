@@ -152,11 +152,32 @@ function App() {
   };
 
   const handleDeleteTask = async (taskId: string) => {
-    // This will be implemented in a later phase to actually delete the task
-    console.log(`Deleting task: ${taskId}`);
-    // For now, just reset the pending deletion state
-    setPendingDeletionTask(null);
-    setIsUILocked(false);
+    const token = localStorage.getItem('jwt');
+    if (!token) {
+      console.error('No JWT token found.');
+      return;
+    }
+
+    try {
+      const response = await fetch(`${import.meta.env.VITE_APP_API_BASE_URL}/api/tasks/${taskId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      if (response.ok) {
+        setTasks(prevTasks => prevTasks.filter(task => task.id !== taskId));
+        setPendingDeletionTask(null);
+        setIsUILocked(false);
+      } else {
+        console.error('Failed to delete task', response.statusText);
+        alert('Failed to delete task. Please try again.');
+      }
+    } catch (error) {
+      console.error('Error deleting task:', error);
+      alert('Error deleting task. Please try again.');
+    }
   };
 
   const triggerHapticFeedback = (pattern: number | number[]) => {

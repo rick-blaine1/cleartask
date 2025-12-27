@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import type { Task } from '../db';
+import { speakDeleteConfirmationPrompt } from '../tts';
 
 interface TaskCardProps {
   task: Task;
