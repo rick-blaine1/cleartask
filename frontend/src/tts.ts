@@ -54,7 +54,7 @@ export function speakTaskCreated(): void {
  * Speaks feedback when voice input is ambiguous
  */
 export function speakAmbiguousInput(): void {
-  speak("I didn't quite catch that. Can you please rephrase?");
+  speak("I didn't quite catch that. Can you please try again and rephrase your request?");
 }
 
 /**

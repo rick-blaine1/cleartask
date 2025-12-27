@@ -8,6 +8,7 @@ export interface Task {
   due_date: string | null;
   is_completed: boolean;
   original_request: string;
+  is_archived?: boolean;
 }
 
 export class ClearTaskDexie extends Dexie {

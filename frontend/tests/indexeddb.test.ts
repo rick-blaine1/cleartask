@@ -1,4 +1,4 @@
-import { test, expect } from 'vitest';
+import { describe, test, expect } from 'vitest';
 import { db, Task } from '../src/db';
 
 // Mock the fetch API to simulate backend interaction
@@ -22,7 +22,8 @@ const triggerOnlineEvent = () => {
   window.dispatchEvent(new Event('online'));
 };
 
-test('new task saved to IndexedDB is successfully moved to Postgres DB when online', async () => {
+describe('IndexedDB Sync Tests', () => {
+  test('new task saved to IndexedDB is successfully moved to Postgres DB when online', async () => {
   // 1. Setup: Ensure DB is empty and offline
   await db.tasks.clear();
   isOnline = false;
@@ -71,4 +72,5 @@ test('new task saved to IndexedDB is successfully moved to Postgres DB when onli
 
   // In a real end-to-end test, you would also verify the task exists in the Postgres DB via a backend API call.
   // For unit testing the IndexedDB sync *mechanism*, verifying its removal from local storage after a successful mock API call is sufficient.
+  });
 });

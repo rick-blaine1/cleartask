@@ -101,12 +101,26 @@ This phase successfully implemented the core logic for voice-gated task deletion
 
 ---
 
-## 6. Phase 5: Natural Language Editing
+## 6. Phase 5: Natural Language Editing [PARTIALLY COMPLETED]
 **Goal:** Allow users to update tasks via casual speech (e.g., "Change milk to Saturday").
 
-### 6.1 Logic
-* Refine the System Prompt to identify editing intent and match transcripts to existing database entries.
-* Implement the reversible archive toggle that moves completed tasks without shifting the layout.
+**Completion Summary (Token Estimate: ~XXXX Tokens)**
+This phase has been partially implemented with backend logic for task editing and completion, but frontend UI for archive functionality is pending.
 
-### 6.2 TDD Strategy
-* **Test:** Send a transcript "Mark milk as done" and verify the `is_completed` flag is toggled to `true`.
+### 6.1 Backend Logic [COMPLETED]
+* Refined the System Prompt to identify editing intent ("create_task" vs "edit_task") and match transcripts to existing database entries. (Backend: [`backend/app.js:163`](backend/app.js:163))
+* Implemented UPDATE query logic to handle task editing when LLM returns `intent: "edit_task"`. (Backend: [`backend/app.js:255-283`](backend/app.js:255-283))
+* Created archive endpoint (`PUT /api/tasks/:id/archive`) to toggle `is_archived` flag. (Backend: [`backend/app.js:363-388`](backend/app.js:363-388))
+* Modified `/api/tasks` endpoint to support `showArchived` query parameter for filtering archived tasks. (Backend: [`backend/app.js:74-76`](backend/app.js:74-76))
+
+### 6.2 TDD Strategy [COMPLETED]
+* **Test:** Send a transcript "Mark milk as done" and verify the `is_completed` flag is toggled to `true`. (Frontend: [`frontend/tests/task_completion.test.ts:23-86`](frontend/tests/task_completion.test.ts:23-86))
+* **Test:** Mark task as done with different phrasings (e.g., "mark eggs as complete", "complete call dentist", "finish water plants"). (Frontend: [`frontend/tests/task_completion.test.ts:88-131`](frontend/tests/task_completion.test.ts:88-131))
+* **Test:** Toggle task completion status back to incomplete. (Frontend: [`frontend/tests/task_completion.test.ts:133-184`](frontend/tests/task_completion.test.ts:133-184))
+* **Test:** Handle completion request for non-existent task. (Frontend: [`frontend/tests/task_completion.test.ts:188-206`](frontend/tests/task_completion.test.ts:188-206))
+* **Test:** Handle unauthorized completion request. (Frontend: [`frontend/tests/task_completion.test.ts:208-223`](frontend/tests/task_completion.test.ts:208-223))
+
+### 6.3 Frontend UI [PENDING]
+* Implement UI toggle button to show/hide archived tasks.
+* Add visual indication for archived tasks (e.g., strikethrough, opacity).
+* Integrate archive functionality with task cards.

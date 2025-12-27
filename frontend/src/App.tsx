@@ -138,8 +138,8 @@ function App() {
   const handleInitiateDeleteConfirmation = (taskToConfirm: Task) => {
     setPendingDeletionTask(taskToConfirm);
     setIsUILocked(true);
-    // Placeholder for app speaking: “Are you sure you want to delete [Task]?”
-    console.log(`App speaks: “Are you sure you want to delete ${taskToConfirm.task_name}?”`);
+    // Placeholder for app speaking: "Are you sure you want to delete [Task]?"
+    console.log(`App speaks: "Are you sure you want to delete ${taskToConfirm.task_name}?"`);
     // Placeholder for opening mic for 10 seconds
     console.log('Opening mic for 10 seconds...');
   };
@@ -251,16 +251,27 @@ function App() {
       });
 
       if (response.ok) {
-        const newTask = await response.json();
-        console.log('LLM Response (Success):', newTask); // Log the LLM's response
-        setTasks(prevTasks => [...prevTasks, newTask]);
+        const taskData = await response.json();
+        console.log('LLM Response (Success):', taskData); // Log the LLM's response
+        
+        // Handle both create (201) and update (200) responses
+        if (response.status === 201) {
+          // New task created - add to list
+          setTasks(prevTasks => [...prevTasks, taskData]);
+        } else if (response.status === 200) {
+          // Existing task updated - replace in list
+          setTasks(prevTasks => prevTasks.map(task =>
+            task.id === taskData.id ? taskData : task
+          ));
+        }
+        
         setTranscript(''); // Clear the transcript input
         speakTaskCreated();
       } else {
         const errorData = await response.json();
         console.error('LLM Response (Error):', errorData); // Log the LLM's error response
         console.error('Failed to create task from voice input:', errorData.message);
-        alert(`Failed to create task: ${errorData.message}`);
+
         speakAmbiguousInput();
       }
     } catch (error) {
