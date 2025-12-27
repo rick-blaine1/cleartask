@@ -26,10 +26,10 @@ services:
       - ./backend:/app
       - /app/node_modules
     environment:
-      - DB_USER=user
+      - DB_USER=${POSTGRES_USER}
       - DB_HOST=db
       - DB_NAME=cleartaskdb
-      - DB_PASSWORD=password
+      - DB_PASSWORD=${POSTGRES_PASSWORD}
       - DB_PORT=5432
       - JWT_SECRET=supersecretjwtkey
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
