@@ -4,7 +4,7 @@ import { speakDeleteConfirmationPrompt } from '../tts';
 
 interface TaskCardProps {
   task: Task;
-  onToggleComplete?: (taskId: string) => void;
+  onToggleComplete?: (task: Task) => void;
   onEdit?: (taskId: string) => void;
   onDelete?: (taskId: string) => void;
   onInitiateDeleteConfirmation: (task: Task) => void; // New prop for delete confirmation
@@ -47,7 +47,7 @@ const TaskCard: React.FC<TaskCardProps> = ({
 
   const handleToggleComplete = () => {
     if (onToggleComplete && task.id) {
-      onToggleComplete(task.id);
+      onToggleComplete(task);
     }
   };
 

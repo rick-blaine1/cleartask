@@ -179,6 +179,44 @@ function App() {
     }
   };
 
+  const handleToggleComplete = async (task: Task) => {
+    const token = localStorage.getItem('jwt');
+    if (!token) {
+      console.error('No JWT token found.');
+      return;
+    }
+
+    try {
+      const response = await fetch(`${import.meta.env.VITE_APP_API_BASE_URL}/api/tasks/create-from-voice`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          transcribedText: `mark ${task.task_name} as ${task.is_completed ? 'not done' : 'done'}`,
+          clientDate: new Date().toISOString(),
+          clientTimezoneOffset: new Date().getTimezoneOffset(),
+        }),
+      });
+
+      if (response.ok) {
+        const updatedTask = await response.json();
+        setTasks(prevTasks =>
+          prevTasks.map(t => (t.id === updatedTask.id ? updatedTask : t))
+        );
+        speakTaskCreated(); // Reuse for completion/incompletion feedback
+      } else {
+        const errorData = await response.json();
+        console.error('Failed to toggle task completion:', errorData.message);
+        speakAmbiguousInput();
+      }
+    } catch (error) {
+      console.error('Error toggling task completion:', error);
+      speakAmbiguousInput();
+    }
+  };
+
   const triggerHapticFeedback = (pattern: number | number[]) => {
     if (window.navigator && window.navigator.vibrate) {
       window.navigator.vibrate(pattern);
@@ -304,6 +342,7 @@ function App() {
             <TaskCard
               key={task.id}
               task={task}
+              onToggleComplete={handleToggleComplete}
               onInitiateDeleteConfirmation={handleInitiateDeleteConfirmation}
               onCancelDelete={handleCancelDeleteConfirmation}
               isUILocked={isUILocked}
