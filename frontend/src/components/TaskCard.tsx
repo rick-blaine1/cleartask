@@ -65,6 +65,9 @@ const TaskCard: React.FC<TaskCardProps> = ({
   };
 
   const handleEditClick = () => {
+    setEditedDescription(task.description || '');
+    setEditedTitle(task.task_name || '');
+    setEditedDate(task.due_date ? task.due_date.split('T')[0] : '');
     setIsEditing(true);
   };
 
@@ -77,6 +80,8 @@ const TaskCard: React.FC<TaskCardProps> = ({
 
   const handleCancelClick = () => {
     setEditedDescription(task.description || '');
+    setEditedTitle(task.task_name || '');
+    setEditedDate(task.due_date ? task.due_date.split('T')[0] : '');
     setIsEditing(false);
   };
 
@@ -98,14 +103,20 @@ const TaskCard: React.FC<TaskCardProps> = ({
         </div>
         <p className="task-card-due-date">
           {isEditing ? (
-            <input
-              type="date"
-              className="task-card-date-input"
-              value={editedDate}
-              onChange={(e) => setEditedDate(e.target.value)}
-              aria-label="Due date"
-              aria-describedby="due-date-description"
-            />
+            <>
+              <label htmlFor={`date-input-${task.id}`} style={{ display: 'block', marginBottom: '4px' }}>
+                Due Date:
+              </label>
+              <input
+                id={`date-input-${task.id}`}
+                type="date"
+                className="task-card-date-input"
+                value={editedDate}
+                onChange={(e) => setEditedDate(e.target.value)}
+                aria-label="Due date"
+                aria-describedby="due-date-description"
+              />
+            </>
           ) : (
             task.due_date ? (() => {
               const [year, month, day] = task.due_date.split('T')[0].split('-').map(Number);
