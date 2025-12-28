@@ -45,6 +45,7 @@ services:
   db:
     image: postgres:16-alpine
     restart: unless-stopped
+    # Commenting out the ports so they are not exposed on production
     #ports:
     #  - "5432:5432"  
     env_file:
