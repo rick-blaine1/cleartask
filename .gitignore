@@ -15,9 +15,13 @@ dist-ssr
 
 # Environment variables
 .env
+.env.production
 .env.local
 .env.test
 .env.*.local
+
+# Data folders
+data/
 
 # Test files with sensitive data
 **/tests/**/*.secret.*
@@ -51,8 +55,9 @@ Thumbs.db
 *.swo
 *~
 
-# Agent files (commented out to keep AGENTS.md files)
-# .roo/
+# Agent files
+.roo/
+AGENTS.md
 
 # Editor directories and files
 .vscode/*
