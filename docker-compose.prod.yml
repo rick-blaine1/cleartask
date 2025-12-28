@@ -1,0 +1,72 @@
+services:
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: production
+      args:
+      # Vite bakes these in at build time
+      - VITE_APP_API_BASE_URL: ${PROD_API_URL}
+      - VITE_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+    ports:
+      - "80:80"
+    restart: unless-stopped
+    networks:
+      - cleartask-network    
+    depends_on:
+      - backend
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: production
+    ports:
+      - "3000:3000"
+    restart: unless-stoppe
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
+      - DB_HOST=db
+      - DB_PORT=5432
+      - FRONTEND_URL=${PROD_FRONTEND_URL}   
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"       
+    networks:
+      - cleartask-network          
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    #ports:
+    #  - "5432:5432"  
+    env_file:
+      - .env
+    environment:
+      POSTGRES_DB: cleartaskdb
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}        
+    volumes:
+      # Use a named volume or a specific path on your Linux host
+      - db_prod_data:/var/lib/postgresql/data
+    networks:
+      - cleartask-network      
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d cleartaskdb"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+networks:
+  cleartask-network:
+    driver: bridge
+
+volumes:
+  db_prod_data:

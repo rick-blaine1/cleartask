@@ -91,14 +91,14 @@ function App() {
       recognitionRef.current.onresult = (event: any) => {
         const speechResult = event.results[0][0].transcript;
         setTranscript(speechResult);
-        console.log('Speech Result:', speechResult);
+        // console.log('Speech Result:', speechResult); // Potentially sensitive user speech
         // Automatically send the speech result to the backend
         sendVoiceTranscriptToBackend(speechResult);
       };
 
       recognitionRef.current.onend = () => {
         setIsListening(false);
-        console.log('Speech recognition ended.');
+        // console.log('Speech recognition ended.');
       };
 
       recognitionRef.current.onerror = (event: any) => {
@@ -166,15 +166,15 @@ function App() {
     setPendingDeletionTask(taskToConfirm);
     setIsUILocked(true);
     // Placeholder for app speaking: "Are you sure you want to delete [Task]?"
-    console.log(`App speaks: "Are you sure you want to delete ${taskToConfirm.task_name}?"`);
+    // console.log(`App speaks: "Are you sure you want to delete [Task]?"`); // Sanitized task_name
     // Placeholder for opening mic for 10 seconds
-    console.log('Opening mic for 10 seconds...');
+    // console.log('Opening mic for 10 seconds...');
   };
 
   const handleCancelDeleteConfirmation = () => {
     setPendingDeletionTask(null);
     setIsUILocked(false);
-    console.log('Delete confirmation cancelled.');
+    // console.log('Delete confirmation cancelled.');
   };
 
   const handleDeleteTask = async (taskId: string) => {
@@ -282,7 +282,7 @@ function App() {
     }
     playAudioFeedback(440, 100); // Example: A short tone
     triggerHapticFeedback(50); // Example: A short vibration
-    window.location.href = 'http://localhost:3000/api/auth/google';
+    window.location.href = `${import.meta.env.VITE_APP_API_BASE_URL}/api/auth/google`;
   };
 
   const handleGoogleLogout = () => {
@@ -352,7 +352,7 @@ function App() {
       const clientDate = new Date(); // Get current date/time on client
       const clientTimezoneOffset = clientDate.getTimezoneOffset(); // Get timezone offset in minutes
 
-      console.log('LLM Request:', { url: apiUrl, method: 'POST', body: { transcribedText: transcript, clientDate: clientDate.toISOString(), clientTimezoneOffset } });
+      // console.log('LLM Request:', { url: apiUrl, method: 'POST', body: { transcribedText: '[sanitized]', clientDate: clientDate.toISOString(), clientTimezoneOffset } }); // Sanitized transcribedText
       const response = await fetch(apiUrl, {
         method: 'POST',
         headers: {
@@ -364,7 +364,7 @@ function App() {
 
       if (response.ok) {
         const taskData = await response.json();
-        console.log('LLM Response (Success):', taskData); // Log the LLM's response
+        // console.log('LLM Response (Success): [sanitized]'); // Sanitized LLM response data
         
         // Handle both create (201) and update (200) responses
         if (response.status === 201) {
