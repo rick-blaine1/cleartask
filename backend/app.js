@@ -26,6 +26,47 @@ function buildApp() {
     callbackUri: `${process.env.BASE_URL || 'http://localhost:3000'}/api/auth/google/callback`,
   });
 
+  // Register Microsoft OAuth2 without startRedirectPath to avoid route conflict
+  fastify.register(fastifyOAuth2, {
+    name: 'microsoftOAuth2', // Unique name for Microsoft OAuth
+    scope: ['openid', 'profile', 'email', 'offline_access'], // Define necessary scopes
+    credentials: {
+      client: {
+        id: process.env.MICROSOFT_CLIENT_ID || '',
+        secret: process.env.MICROSOFT_CLIENT_SECRET || '',
+      },
+      auth: {
+        authorizeHost: 'https://login.microsoftonline.com',
+        authorizePath: '/common/oauth2/v2.0/authorize',
+        tokenHost: 'https://login.microsoftonline.com',
+        tokenPath: '/common/oauth2/v2.0/token'
+      }
+    },
+    // Don't use startRedirectPath - we'll create a custom route instead
+    callbackUri: `${process.env.BASE_URL || 'http://localhost:3000'}/api/auth/microsoft/callback`,
+    generateStateFunction: () => {
+      return Math.random().toString(36).substring(7);
+    },
+    checkStateFunction: () => true,
+  });
+
+  // Custom route to handle Microsoft OAuth with prompt parameter
+  fastify.get('/api/auth/microsoft', async (request, reply) => {
+    fastify.log.info('=== Microsoft OAuth Initiation ===');
+    fastify.log.info(`Query params received: ${JSON.stringify(request.query)}`);
+    
+    // Get the authorization URL from the OAuth2 plugin (await the promise)
+    const authorizationUrl = await fastify.microsoftOAuth2.generateAuthorizationUri(request, reply);
+    
+    // Add prompt=select_account to force account selection
+    const urlWithPrompt = `${authorizationUrl}&prompt=select_account`;
+    
+    fastify.log.info(`Original authorization URL: ${authorizationUrl}`);
+    fastify.log.info(`Modified authorization URL with prompt: ${urlWithPrompt}`);
+    
+    reply.redirect(urlWithPrompt);
+  });
+
   fastify.register(cors, {
     origin: process.env.FRONTEND_URL || 'http://localhost:5173',
     credentials: true,
@@ -130,6 +171,66 @@ function buildApp() {
     } catch (error) {
       fastify.log.error('OAuth callback error:', error);
       reply.status(500).send({ error: 'OAuth callback failed' });
+    }
+  });
+
+  fastify.get('/api/auth/microsoft/callback', async function (request, reply) {
+    fastify.log.info('=== Microsoft OAuth Callback Hit ===');
+    fastify.log.info(`Query params: ${JSON.stringify(request.query)}`);
+    fastify.log.info(`Full URL: ${request.url}`);
+    try {
+      fastify.log.info('Attempting to get access token from authorization code flow.');
+      const { token } = await this.microsoftOAuth2.getAccessTokenFromAuthorizationCodeFlow(request);
+      fastify.log.info('Successfully received access token.');
+      fastify.log.info(`Access token: ${token.access_token ? '[REDACTED]' : 'N/A'}`);
+      fastify.log.info(`Refresh token: ${token.refresh_token ? '[REDACTED]' : 'N/A'}`);
+
+      fastify.log.info('Attempting to fetch user info from Microsoft Graph API.');
+      const userInfoResponse = await fetch('https://graph.microsoft.com/v1.0/me', {
+        headers: {
+          Authorization: `Bearer ${token.access_token}`,
+        },
+      });
+      fastify.log.info(`Microsoft Graph API response status: ${userInfoResponse.status}`);
+      if (!userInfoResponse.ok) {
+        const errorBody = await userInfoResponse.text();
+        fastify.log.error(`Microsoft Graph API error response: ${errorBody}`);
+        throw new Error('Failed to fetch user info from Microsoft Graph API');
+      }
+
+      const microsoftUserProfile = await userInfoResponse.json();
+
+      // Extract relevant user info
+      const userId = `microsoft-${microsoftUserProfile.id}`; // Prefix to avoid collisions
+      const email = microsoftUserProfile.mail || microsoftUserProfile.userPrincipalName; // Get email
+      const name = microsoftUserProfile.displayName;
+
+      // Database operations (see Section 2.3)
+      const client = await pool.connect();
+      try {
+        await client.query(
+          `INSERT INTO users (id, email, name)
+           VALUES ($1, $2, $3)
+           ON CONFLICT (id) DO UPDATE
+           SET email = EXCLUDED.email, name = EXCLUDED.name`,
+          [userId, email, name]
+        );
+      } catch (dbError) {
+        fastify.log.error('Error storing Microsoft user info:', dbError);
+      } finally {
+        client.release();
+      }
+
+      // Generate and sign our custom JWT
+      const ourJwt = fastify.jwt.sign({ userId });
+
+      // Redirect to frontend with JWT
+      reply.redirect(`${process.env.FRONTEND_URL || 'http://localhost:5173'}/#token=${ourJwt}`);
+
+    } catch (error) {
+      fastify.log.error('Microsoft OAuth callback error:', error.message);
+      fastify.log.error('Microsoft OAuth callback stack:', error.stack);
+      reply.status(500).send({ error: 'Microsoft OAuth callback failed' });
     }
   });
 
@@ -435,6 +536,23 @@ function buildApp() {
       fastify.log.error(err);
       reply.status(500).send({ error: 'Internal Server Error' });
     }
+  });
+
+  // Catch-all route for debugging 404s
+  fastify.setNotFoundHandler((request, reply) => {
+    fastify.log.warn(`=== 404 Not Found ===`);
+    fastify.log.warn(`Method: ${request.method}`);
+    fastify.log.warn(`URL: ${request.url}`);
+    fastify.log.warn(`Path: ${request.routeOptions?.url || 'N/A'}`);
+    fastify.log.warn(`Query: ${JSON.stringify(request.query)}`);
+    reply.status(404).send({ error: 'Route not found', path: request.url });
+  });
+
+  // Log all registered routes for debugging
+  fastify.ready(() => {
+    fastify.log.info('=== Registered Routes ===');
+    const routes = fastify.printRoutes();
+    fastify.log.info(routes);
   });
 
   return fastify;

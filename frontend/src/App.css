@@ -78,6 +78,18 @@
   outline-offset: 2px;
 }
 
+.no-tasks-message {
+  font-size: 1.8em;
+  color: #fff;
+  background-color: #333;
+  padding: 20px;
+  border-radius: 8px;
+  margin-top: 40px;
+  font-weight: bold;
+  text-align: center;
+  border: 2px solid #FFD700;
+}
+
 .task-card-date-input {
   font-size: 1.2em; /* Increase font size */
   padding: 8px; /* Add some padding */

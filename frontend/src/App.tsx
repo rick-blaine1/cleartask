@@ -285,6 +285,17 @@ function App() {
     window.location.href = `${import.meta.env.VITE_APP_API_BASE_URL}/api/auth/google`;
   };
 
+  const handleMicrosoftLogin = () => {
+    // Ensure AudioContext is initialized before using it
+    initAudioContext();
+    if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
+      audioContextRef.current.resume();
+    }
+    playAudioFeedback(440, 100); // Example: A short tone
+    triggerHapticFeedback(50); // Example: A short vibration
+    window.location.href = `${import.meta.env.VITE_APP_API_BASE_URL}/api/auth/microsoft`;
+  };
+
   const handleGoogleLogout = () => {
     // Ensure AudioContext is initialized before using it
     initAudioContext();
@@ -406,9 +417,14 @@ function App() {
             {transcript && <p>Transcript: {transcript}</p>}
           </>
         ) : (
-          <button onClick={handleGoogleLogin}>
-            Login with Google
-          </button>
+          <>
+            <button onClick={handleGoogleLogin}>
+              Login with Google
+            </button>
+            <button onClick={handleMicrosoftLogin}>
+              Login with Microsoft
+            </button>
+          </>
         )}
       </div>
         <div className={`task-list ${isUILocked ? 'locked-ui-overlay' : ''}`}>
@@ -425,6 +441,11 @@ function App() {
               onSave={handleSaveTaskDescription}
             />
           ))}
+          {!tasks.length && isLoggedIn && (
+            <div className="no-tasks-message">
+              No tasks to display
+            </div>
+          )}
         </div>
     </>
   );
