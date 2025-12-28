@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import type { Task } from '../db';
 import { speakDeleteConfirmationPrompt } from '../tts';
 
@@ -11,6 +11,7 @@ interface TaskCardProps {
   onCancelDelete: () => void; // New prop for canceling delete confirmation
   isUILocked: boolean; // New prop to indicate if UI is locked
   isPendingDeletion: boolean; // New prop to indicate if this specific task is pending deletion
+  onSave?: (taskId: string, newTitle: string, newDescription: string, newDate: string) => void; // New prop for saving edited description
 }
 
 const TaskCard: React.FC<TaskCardProps> = ({
@@ -21,8 +22,20 @@ const TaskCard: React.FC<TaskCardProps> = ({
   onInitiateDeleteConfirmation,
   onCancelDelete,
   isUILocked,
-  isPendingDeletion
+  isPendingDeletion,
+  onSave
 }) => {
+  const [isEditing, setIsEditing] = useState(false);
+  const [editedDescription, setEditedDescription] = useState(task.description || '');
+  const [editedTitle, setEditedTitle] = useState(task.task_name || '');
+  const [editedDate, setEditedDate] = useState(task.due_date ? task.due_date.split('T')[0] : '');
+
+  useEffect(() => {
+    setEditedDescription(task.description || '');
+    setEditedTitle(task.task_name || '');
+    setEditedDate(task.due_date ? task.due_date.split('T')[0] : '');
+  }, [task.description, task.task_name, task.due_date]);
+
   const isTier1 = task.due_date === null;
   
   // Build class names based on state
@@ -51,25 +64,56 @@ const TaskCard: React.FC<TaskCardProps> = ({
     }
   };
 
-  const handleEdit = () => {
-    if (onEdit && task.id) {
-      onEdit(task.id);
+  const handleEditClick = () => {
+    setIsEditing(true);
+  };
+
+  const handleSaveClick = () => {
+    if (onSave && task.id) {
+      onSave(task.id, editedTitle, editedDescription, editedDate || '');
+      setIsEditing(false);
     }
+  };
+
+  const handleCancelClick = () => {
+    setEditedDescription(task.description || '');
+    setIsEditing(false);
   };
 
   return (
     <div className={cardClassName}>
       <div className="task-card-content">
         <div className="task-card-header">
-          <h3 className="task-card-title">{task.task_name}</h3>
+          {isEditing ? (
+            <input
+              type="text"
+              className="task-card-title-input task-card-title-input-large-contrast"
+              value={editedTitle}
+              onChange={(e) => setEditedTitle(e.target.value)}
+            />
+          ) : (
+            <h3 className="task-card-title">{task.task_name}</h3>
+          )}
           {isTier1 && <span className="task-card-badge">No Date</span>}
         </div>
         <p className="task-card-due-date">
-          {task.due_date ? (() => {
-            const [year, month, day] = task.due_date.split('T')[0].split('-').map(Number);
-            const localDate = new Date(year, month - 1, day); // Month is 0-indexed
-            return `Due: ${localDate.toLocaleDateString()}`;
-          })() : 'No due date'}
+          {isEditing ? (
+            <input
+              type="date"
+              className="task-card-date-input"
+              value={editedDate}
+              onChange={(e) => setEditedDate(e.target.value)}
+              aria-label="Due date"
+              aria-describedby="due-date-description"
+            />
+          ) : (
+            task.due_date ? (() => {
+              const [year, month, day] = task.due_date.split('T')[0].split('-').map(Number);
+              const localDate = new Date(year, month - 1, day); // Month is 0-indexed
+              const options: Intl.DateTimeFormatOptions = { year: 'numeric', month: 'long', day: 'numeric' };
+              return `Due: ${localDate.toLocaleDateString('en-US', options)}`;
+            })() : 'No due date'
+          )}
         </p>
         <p className="task-card-status">
           Status: {task.is_completed ? 'Completed' : 'Pending'}
@@ -95,32 +139,53 @@ const TaskCard: React.FC<TaskCardProps> = ({
             </button>
           </>
         ) : (
-          <>
-            <button
-              className={`task-card-button task-card-button-complete ${task.is_completed ? 'completed' : ''}`}
-              onClick={handleToggleComplete}
-              aria-label={task.is_completed ? 'Mark as incomplete' : 'Mark as complete'}
-              disabled={isUILocked}
-            >
-              {task.is_completed ? '✓ Done' : 'Complete'}
-            </button>
-            <button
-              className="task-card-button task-card-button-edit"
-              onClick={handleEdit}
-              aria-label="Edit task"
-              disabled={isUILocked}
-            >
-              Edit
-            </button>
-            <button
-              className="task-card-button task-card-button-delete"
-              onClick={handleDeleteClick}
-              aria-label="Delete task"
-              disabled={isUILocked}
-            >
-              Delete
-            </button>
-          </>
+          isEditing ? (
+            <>
+              <button
+                className="task-card-button task-card-button-save"
+                onClick={handleSaveClick}
+                aria-label="Save task description"
+                disabled={isUILocked}
+              >
+                Save
+              </button>
+              <button
+                className="task-card-button task-card-button-cancel"
+                onClick={handleCancelClick}
+                aria-label="Cancel editing"
+                disabled={isUILocked}
+              >
+                Cancel
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                className={`task-card-button task-card-button-complete ${task.is_completed ? 'completed' : ''}`}
+                onClick={handleToggleComplete}
+                aria-label={task.is_completed ? 'Mark as incomplete' : 'Mark as complete'}
+                disabled={isUILocked}
+              >
+                {task.is_completed ? '✓ Done' : 'Complete'}
+              </button>
+              <button
+                className="task-card-button task-card-button-edit"
+                onClick={handleEditClick}
+                aria-label="Edit task"
+                disabled={isUILocked}
+              >
+                Edit
+              </button>
+              <button
+                className="task-card-button task-card-button-delete"
+                onClick={handleDeleteClick}
+                aria-label="Delete task"
+                disabled={isUILocked}
+              >
+                Delete
+              </button>
+            </>
+          )
         )}
       </div>
     </div>

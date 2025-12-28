@@ -5,9 +5,12 @@ export interface Task {
   id?: string;
   user_id: string;
   task_name: string;
+  title: string;
   due_date: string | null;
+  date: string;
   is_completed: boolean;
   original_request: string;
+  description?: string; // Added new property
   is_archived?: boolean;
 }
 

@@ -47,5 +47,48 @@
 
 .locked-ui-overlay {
   pointer-events: none; /* Disable all pointer events on children */
-  opacity: 0.5; /* Visually indicate locked state */
+}
+
+/* Dim non-pending-delete task cards while maintaining high contrast */
+.locked-ui-overlay .task-card:not(.pending-delete) {
+  filter: brightness(0.4); /* Darken without reducing opacity for better contrast */
+}
+
+/* Re-enable pointer events for the task card that is pending deletion */
+.locked-ui-overlay .task-card.pending-delete {
+  pointer-events: auto; /* Allow interactions with the pending delete task */
+}
+
+.task-card-title-input-large-contrast {
+  width: 100% !important; /* Ensure input takes full width of container */
+  box-sizing: border-box !important; /* Include padding and border in width calculation */
+  font-size: 1.2rem !important; /* Accessible font size for better readability */
+  padding: 30px !important; /* Increased padding for larger touch/click area */
+  border: 4px solid #000 !important; /* Thicker, high contrast border */
+  background-color: #fff !important; /* Pure white background for maximum contrast */
+  color: #000 !important; /* Pure black text for maximum contrast */
+  min-height: 100px !important; /* Ensure minimum height for better visibility */
+  font-weight: bold !important; /* Bold text for better visibility */
+  display: block !important; /* Ensure proper display */
+  margin-bottom: 8px !important; /* Spacing below the input */
+}
+
+.task-card-title-input-large-contrast:focus {
+  outline: 4px solid #FFD700; /* Gold color, very prominent outline */
+  outline-offset: 2px;
+}
+
+.task-card-date-input {
+  font-size: 1.2em; /* Increase font size */
+  padding: 8px; /* Add some padding */
+  border: 2px solid #555; /* Darker border for contrast */
+  background-color: #f8f8f8; /* Slightly off-white background */
+  color: #222; /* Dark text for contrast */
+  border-radius: 4px;
+  outline: none;
+}
+
+.task-card-date-input:focus {
+  border-color: #007bff; /* Highlight focus with a blue border */
+  box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.25); /* Add a subtle glow on focus */
 }

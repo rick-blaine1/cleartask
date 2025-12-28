@@ -381,6 +381,35 @@ function buildApp() {
     }
   });
 
+  fastify.put('/api/tasks/:id', { onRequest: [fastify.authenticate] }, async (request, reply) => {
+    try {
+      const { id } = request.params;
+      const { task_name, description, due_date } = request.body;
+
+      const client = await pool.connect();
+      const result = await client.query(
+        `UPDATE tasks
+         SET task_name = COALESCE($1, task_name),
+             description = COALESCE($2, description),
+             due_date = COALESCE($3, due_date),
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $4 AND user_id = $5
+         RETURNING id, task_name, description, due_date, is_completed, original_request, is_archived`,
+        [task_name, description, due_date, id, request.user.id]
+      );
+      client.release();
+
+      if (result.rowCount === 0) {
+        reply.status(404).send({ error: 'Task not found or user not authorized.' });
+      } else {
+        reply.status(200).send(result.rows[0]);
+      }
+    } catch (err) {
+      fastify.log.error(err);
+      reply.status(500).send({ error: 'Internal Server Error' });
+    }
+  });
+
   fastify.put('/api/tasks/:id/archive', { onRequest: [fastify.authenticate] }, async (request, reply) => {
     try {
       const { id } = request.params;
@@ -468,6 +497,7 @@ if (process.env.NODE_ENV !== 'test') {
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             user_id VARCHAR(255) NOT NULL,
             task_name TEXT NOT NULL,
+            description TEXT,
             due_date DATE,
             is_completed BOOLEAN DEFAULT FALSE,
             original_request TEXT,
@@ -475,6 +505,13 @@ if (process.env.NODE_ENV !== 'test') {
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             is_archived BOOLEAN DEFAULT FALSE
           );
+        `);
+        
+        // Add description column if it doesn't exist (for existing databases)
+        app.log.info('Adding description column if it doesn\'t exist...');
+        await client.query(`
+          ALTER TABLE tasks
+          ADD COLUMN IF NOT EXISTS description TEXT;
         `);
         app.log.info('Tasks table created successfully');
         

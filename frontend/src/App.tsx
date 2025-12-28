@@ -1,7 +1,9 @@
 import React, { useEffect, useState, useRef } from 'react';
 import TaskCard from './components/TaskCard';
 import type { Task } from './db';
+import { db } from './db';
 import { speak, speakTaskCreated, speakAmbiguousInput } from './tts';
+import './App.css';
 
 declare global {
   interface Window {
@@ -19,6 +21,31 @@ function App() {
   const recognitionRef = useRef<any>(null);
 
   const audioContextRef = useRef<AudioContext | null>(null);
+
+  // Sorting function: tasks without due dates first, then tasks with due dates (ascending)
+  const sortTasks = (tasksToSort: Task[]): Task[] => {
+    return [...tasksToSort].sort((a, b) => {
+      // Tasks without due dates come first
+      if (!a.due_date && b.due_date) return -1;
+      if (a.due_date && !b.due_date) return 1;
+      
+      // Both have due dates: sort by due date ascending
+      if (a.due_date && b.due_date) {
+        const dateA = new Date(a.due_date).getTime();
+        const dateB = new Date(b.due_date).getTime();
+        if (dateA !== dateB) return dateA - dateB;
+        // If due dates are equal, sort by createdAt (ascending - older first)
+        const createdAtA = new Date((a as any).createdAt || (a as any).created_at || a.date).getTime();
+        const createdAtB = new Date((b as any).createdAt || (b as any).created_at || b.date).getTime();
+        return createdAtA - createdAtB;
+      }
+      
+      // Neither has due date: sort by createdAt (ascending - older first)
+      const createdAtA = new Date((a as any).createdAt || (a as any).created_at || a.date).getTime();
+      const createdAtB = new Date((b as any).createdAt || (b as any).created_at || b.date).getTime();
+      return createdAtA - createdAtB;
+    });
+  };
 
   const initAudioContext = () => {
     if (!audioContextRef.current) {
@@ -124,7 +151,7 @@ function App() {
       });
       if (response.ok) {
         const data = await response.json();
-        setTasks(data);
+        setTasks(sortTasks(data));
       } else {
         console.error('Failed to fetch tasks', response.statusText);
         setTasks([]);
@@ -166,7 +193,7 @@ function App() {
       });
 
       if (response.ok) {
-        setTasks(prevTasks => prevTasks.filter(task => task.id !== taskId));
+        setTasks(prevTasks => sortTasks(prevTasks.filter(task => task.id !== taskId)));
         setPendingDeletionTask(null);
         setIsUILocked(false);
       } else {
@@ -187,6 +214,10 @@ function App() {
     }
 
     try {
+      // Send a more explicit command with the task ID to help the LLM
+      const newCompletionStatus = !task.is_completed;
+      const transcribedText = `Mark task "${task.task_name}" with ID ${task.id} as ${newCompletionStatus ? 'completed' : 'not completed'}`;
+      
       const response = await fetch(`${import.meta.env.VITE_APP_API_BASE_URL}/api/tasks/create-from-voice`, {
         method: 'POST',
         headers: {
@@ -194,7 +225,7 @@ function App() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          transcribedText: `mark ${task.task_name} as ${task.is_completed ? 'not done' : 'done'}`,
+          transcribedText: transcribedText,
           clientDate: new Date().toISOString(),
           clientTimezoneOffset: new Date().getTimezoneOffset(),
         }),
@@ -203,7 +234,7 @@ function App() {
       if (response.ok) {
         const updatedTask = await response.json();
         setTasks(prevTasks =>
-          prevTasks.map(t => (t.id === updatedTask.id ? updatedTask : t))
+          sortTasks(prevTasks.map(t => (t.id === updatedTask.id ? updatedTask : t)))
         );
         speakTaskCreated(); // Reuse for completion/incompletion feedback
       } else {
@@ -267,6 +298,49 @@ function App() {
     setTasks([]);
   };
 
+  const handleSaveTaskDescription = async (taskId: string, newTitle: string, newDescription: string, newDate: string) => {
+    const token = localStorage.getItem('jwt');
+    if (!token) {
+      console.error('No JWT token found.');
+      alert('You must be logged in to save changes.');
+      return;
+    }
+
+    try {
+      // Update in backend
+      const response = await fetch(`${import.meta.env.VITE_APP_API_BASE_URL}/api/tasks/${taskId}`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          task_name: newTitle,
+          description: newDescription,
+          due_date: newDate || null,
+        }),
+      });
+
+      if (response.ok) {
+        const updatedTask = await response.json();
+        
+        // Update in React state with the response from backend
+        setTasks(prevTasks =>
+          sortTasks(prevTasks.map(task =>
+            task.id === taskId ? updatedTask : task
+          ))
+        );
+      } else {
+        const errorData = await response.json();
+        console.error('Failed to save task:', errorData);
+        alert('Failed to save task. Please try again.');
+      }
+    } catch (error) {
+      console.error('Error saving task:', error);
+      alert('Failed to save task. Please try again.');
+    }
+  };
+
   const sendVoiceTranscriptToBackend = async (transcript: string) => {
     const token = localStorage.getItem('jwt');
     if (!token) {
@@ -295,12 +369,12 @@ function App() {
         // Handle both create (201) and update (200) responses
         if (response.status === 201) {
           // New task created - add to list
-          setTasks(prevTasks => [...prevTasks, taskData]);
+          setTasks(prevTasks => sortTasks([...prevTasks, taskData]));
         } else if (response.status === 200) {
           // Existing task updated - replace in list
-          setTasks(prevTasks => prevTasks.map(task =>
+          setTasks(prevTasks => sortTasks(prevTasks.map(task =>
             task.id === taskData.id ? taskData : task
-          ));
+          )));
         }
         
         setTranscript(''); // Clear the transcript input
@@ -348,6 +422,7 @@ function App() {
               isUILocked={isUILocked}
               isPendingDeletion={pendingDeletionTask?.id === task.id}
               onDelete={handleDeleteTask} // Pass the actual delete handler
+              onSave={handleSaveTaskDescription}
             />
           ))}
         </div>
