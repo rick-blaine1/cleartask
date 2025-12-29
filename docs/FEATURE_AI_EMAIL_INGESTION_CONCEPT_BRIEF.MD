@@ -43,7 +43,7 @@ Instead of forcing users to read, parse, and manually re-enter work from an inbo
 * **Multi-Party Logic:** If Sam asks the user to contact Martha, the task is named: `"Ask Martha to [Action] for Sam"`.
 * **Attachment Handling:** If an email contains or references an attachment, the title must explicitly state: `"Check [Attachment Type] from [Sender] re: [Original Subject]"`.
 * **Multi-Task Splitting:** If an email contains 5 distinct "to-dos," the system creates **5 separate tasks**. This prevents "hidden" work inside a single task description.
-* **Informational Catch-All:** If no clear action is found, a task titled `"Review email: [Subject]"` is created if the email references a future decision or dependency.
+* **Informational Catch-All:** If no clear action is found, a task titled `"Review email from [Sender]: [Subject]"` is created if the email references a future decision or dependency.
 
 ---
 
