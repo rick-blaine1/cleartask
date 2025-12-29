@@ -4,6 +4,10 @@ import fastifyJwt from '@fastify/jwt';
 import fastifyOAuth2 from '@fastify/oauth2';
 import cors from '@fastify/cors';
 import OpenAI from "openai";
+import { processUserInput } from './inputProcessor.js';
+import { buildTaskParsingPrompt, buildTaskSuggestionPrompt, sanitizeUserInput } from './promptTemplates.js';
+import { validateLLMTaskOutput, createSafeFallbackTask, sanitizeForDatabase } from './src/schemas/task.schema.js';
+import { llmLogger } from './utils/llmLogger.js';
 
 function buildApp() {
   const fastify = Fastify({ logger: true });
@@ -235,14 +239,33 @@ function buildApp() {
   });
 
   fastify.post('/api/tasks/create-from-voice', { onRequest: [fastify.authenticate] }, async (request, reply) => {
+    const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+    
     try {
-      const { transcribedText, clientDate, clientTimezoneOffset } = request.body;
+      const { transcribedText: rawTranscribedText, clientDate, clientTimezoneOffset } = request.body;
+      
+      // Log initial request with security context
+      llmLogger.info({
+        requestId,
+        userId: request.user.id,
+        event: 'llm_request_start',
+        rawInputLength: rawTranscribedText?.length || 0,
+        timestamp: new Date().toISOString()
+      }, 'LLM task parsing request initiated');
+      
+      const transcribedText = processUserInput(rawTranscribedText, request.user.id);
 
       if (!transcribedText) {
+        llmLogger.warn({
+          requestId,
+          userId: request.user.id,
+          event: 'input_validation_failed',
+          reason: 'empty_transcribed_text'
+        }, 'Request rejected: empty transcribed text');
         return reply.status(400).send({ error: 'Transcribed text is required.' });
       }
 
-      let taskDetails = null;
+      let rawLLMOutput = null;
       let llmUsed = 'None';
       const clientCurrentDate = new Date(clientDate);
       clientCurrentDate.setMinutes(clientCurrentDate.getMinutes() - clientTimezoneOffset);
@@ -264,46 +287,36 @@ function buildApp() {
         client.release();
       }
 
-      const existingTasksContext = existingTasks.length > 0
-        ? `\n\n# EXISTING TASKS\nThe user currently has these tasks:\n${existingTasks.map(t => `- ID: ${t.id}, Name: "${t.task_name}", Due: ${t.due_date || 'No date'}, Completed: ${t.is_completed}`).join('\n')}`
-        : '\n\n# EXISTING TASKS\nThe user has no existing tasks.';
-
-      const prompt = `Think Hard about this.
-      # ROLE 
-      You are a world class personal assistant. If presented with an incomplete time, assume that it is in the current year and relative to today.
-
-      # CONTEXT
-      Today is ${currentTimeForLLM}${existingTasksContext}
-
-      # TASK
-      Parse the following transcribed text into a JSON object. The JSON object should contain the following fields:
-      - task_name (string): The name of the task.
-      - due_date (string, YYYY-MM-DD or null): The due date of the task.
-      - is_completed (boolean): Whether the task is completed.
-      - original_request (string): The original transcribed text.
-      - intent (string): Categorize the user's intent as either "create_task" or "edit_task". If the user is referring to an existing task (e.g., "mark X as done", "change X to Y", "complete X"), set this to "edit_task".
-      - task_id (string or null): If the intent is "edit_task", provide the ID of the task being edited by matching the user's description to the existing tasks list above. Otherwise, this should be null.
-
-      Transcribed text: "${transcribedText}"
-      Example for create_task:
-      {
-        "task_name": "Buy groceries",
-        "due_date": "2025-12-31",
-        "is_completed": false,
-        "original_request": "I need to buy groceries by the end of the year.",
-        "intent": "create_task",
-        "task_id": null
+      // Use reusable prompt template with sanitized input
+      const sanitizedInput = sanitizeUserInput(transcribedText);
+      
+      // Log input sanitization
+      if (sanitizedInput !== transcribedText) {
+        llmLogger.warn({
+          requestId,
+          userId: request.user.id,
+          event: 'input_sanitized',
+          originalLength: transcribedText.length,
+          sanitizedLength: sanitizedInput.length,
+          changeDetected: true
+        }, 'User input was sanitized before LLM processing');
       }
-      Example for edit_task:
-      {
-        "task_name": "Call mom",
-        "due_date": "2025-12-25",
-        "is_completed": false,
-        "original_request": "Change call dad to call mom and make it due for christmas",
-        "intent": "edit_task",
-        "task_id": "a1b2c3d4-e5f6-7890-1234-567890abcdef"
-      }
-      `;
+      
+      const prompt = buildTaskParsingPrompt({
+        transcribedText: sanitizedInput,
+        currentDate: currentTimeForLLM,
+        existingTasks
+      });
+      
+      // Log prompt construction (without full content to avoid log bloat)
+      llmLogger.debug({
+        requestId,
+        userId: request.user.id,
+        event: 'prompt_constructed',
+        promptLength: prompt.length,
+        existingTasksCount: existingTasks.length
+      }, 'LLM prompt constructed');
+      
       const callLLM = async (llmClient, modelName, timeoutMs) => {
         const timeoutPromise = new Promise((resolve, reject) => {
           setTimeout(() => {
@@ -327,54 +340,224 @@ function buildApp() {
       // Try Requesty first
       if (requesty) {
         try {
-          taskDetails = await callLLM(requesty, "openai/gpt-4o-mini", 5000);
+          llmLogger.debug({
+            requestId,
+            userId: request.user.id,
+            event: 'llm_call_start',
+            provider: 'Requesty',
+            model: 'openai/gpt-4o-mini',
+            timeout: 5000
+          }, 'Attempting LLM call to Requesty');
+          
+          rawLLMOutput = await callLLM(requesty, "openai/gpt-4o-mini", 5000);
           llmUsed = 'Requesty';
-          fastify.log.info('Task parsed successfully using Requesty.');
+          
+          llmLogger.info({
+            requestId,
+            userId: request.user.id,
+            event: 'llm_call_success',
+            provider: 'Requesty',
+            outputSize: JSON.stringify(rawLLMOutput).length
+          }, 'Task parsed successfully using Requesty');
         } catch (requestyError) {
-          fastify.log.warn('Requesty failed or timed out, falling back to OpenAI:', requestyError.message);
+          llmLogger.warn({
+            requestId,
+            userId: request.user.id,
+            event: 'llm_call_failed',
+            provider: 'Requesty',
+            error: requestyError.message,
+            willFallback: !!openai
+          }, 'Requesty failed or timed out, falling back to OpenAI');
+          
           // Fallback to OpenAI if Requesty fails
           if (openai) {
             try {
-              taskDetails = await callLLM(openai, "gpt-4o-mini", 3000);
+              llmLogger.debug({
+                requestId,
+                userId: request.user.id,
+                event: 'llm_call_start',
+                provider: 'OpenAI',
+                model: 'gpt-4o-mini',
+                timeout: 3000,
+                isFallback: true
+              }, 'Attempting fallback LLM call to OpenAI');
+              
+              rawLLMOutput = await callLLM(openai, "gpt-4o-mini", 3000);
               llmUsed = 'OpenAI';
-              fastify.log.info('Task parsed successfully using OpenAI fallback.');
+              
+              llmLogger.info({
+                requestId,
+                userId: request.user.id,
+                event: 'llm_call_success',
+                provider: 'OpenAI',
+                outputSize: JSON.stringify(rawLLMOutput).length,
+                isFallback: true
+              }, 'Task parsed successfully using OpenAI fallback');
             } catch (openaiError) {
-              fastify.log.error('OpenAI fallback also failed:', openaiError.message);
+              llmLogger.error({
+                requestId,
+                userId: request.user.id,
+                event: 'llm_call_failed',
+                provider: 'OpenAI',
+                error: openaiError.message,
+                isFallback: true
+              }, 'OpenAI fallback also failed');
             }
           }
         }
       } else if (openai) {
         // If Requesty is not configured, try OpenAI directly
         try {
-          taskDetails = await callLLM(openai, "gpt-3.5-turbo", 3000);
+          llmLogger.debug({
+            requestId,
+            userId: request.user.id,
+            event: 'llm_call_start',
+            provider: 'OpenAI',
+            model: 'gpt-4o-mini',
+            timeout: 3000
+          }, 'Attempting LLM call to OpenAI');
+          
+          rawLLMOutput = await callLLM(openai, "gpt-4o-mini", 3000);
           llmUsed = 'OpenAI';
-          fastify.log.info('Task parsed successfully using OpenAI.');
+          
+          llmLogger.info({
+            requestId,
+            userId: request.user.id,
+            event: 'llm_call_success',
+            provider: 'OpenAI',
+            outputSize: JSON.stringify(rawLLMOutput).length
+          }, 'Task parsed successfully using OpenAI');
         } catch (openaiError) {
-          fastify.log.error('OpenAI API call failed:', openaiError.message);
+          llmLogger.error({
+            requestId,
+            userId: request.user.id,
+            event: 'llm_call_failed',
+            provider: 'OpenAI',
+            error: openaiError.message
+          }, 'OpenAI API call failed');
         }
       }
 
-      // If both fail or are not configured, use a simple fallback
-      if (!taskDetails) {
-        fastify.log.warn('No LLM configured or all LLMs failed, using simple fallback for task parsing.');
-        taskDetails = {
-          task_name: transcribedText,
-          due_date: null,
-          is_completed: false,
-          original_request: transcribedText,
-          intent: "create_task",
-          task_id: null
-        };
-        llmUsed = 'Fallback';
+      // CRITICAL SECURITY CONTROL: Validate LLM output before any database operations
+      // This is the trust boundary - LLM output is untrusted until validated
+      let validatedTaskData;
+      let usedFallback = false;
+      
+      if (rawLLMOutput) {
+        llmLogger.info({
+          requestId,
+          userId: request.user.id,
+          event: 'llm_output_received',
+          outputStructure: Object.keys(rawLLMOutput),
+          outputSize: JSON.stringify(rawLLMOutput).length
+        }, 'Raw LLM output received');
+        
+        // Log full output in debug mode only
+        llmLogger.debug({
+          requestId,
+          userId: request.user.id,
+          rawLLMOutput
+        }, 'Full LLM output (debug)');
+        
+        const validationResult = validateLLMTaskOutput(rawLLMOutput);
+        
+        if (validationResult.success) {
+          llmLogger.info({
+            requestId,
+            userId: request.user.id,
+            event: 'validation_success',
+            intent: validationResult.data.intent,
+            hasTaskId: !!validationResult.data.task_id
+          }, 'LLM output passed schema validation');
+          
+          validatedTaskData = sanitizeForDatabase(validationResult.data);
+        } else {
+          // Schema validation failed - log and use safe fallback
+          llmLogger.warn({
+            requestId,
+            userId: request.user.id,
+            event: 'validation_failed',
+            error: validationResult.error?.message,
+            issues: validationResult.issues,
+            securitySignal: 'VALIDATION_FAILURE'
+          }, 'LLM output failed schema validation - potential prompt injection or malformed output');
+          
+          llmLogger.warn({
+            requestId,
+            userId: request.user.id,
+            event: 'fallback_activated',
+            reason: 'validation_failed'
+          }, 'Using safe fallback task creation');
+          
+          validatedTaskData = createSafeFallbackTask(transcribedText);
+          usedFallback = true;
+          llmUsed = 'Fallback (Validation Failed)';
+        }
+      } else {
+        // No LLM output - use safe fallback
+        llmLogger.warn({
+          requestId,
+          userId: request.user.id,
+          event: 'fallback_activated',
+          reason: 'no_llm_output',
+          securitySignal: 'NO_LLM_OUTPUT'
+        }, 'No LLM configured or all LLMs failed, using safe fallback for task parsing');
+        
+        validatedTaskData = createSafeFallbackTask(transcribedText);
+        usedFallback = true;
+        llmUsed = 'Fallback (No LLM)';
       }
 
-      fastify.log.info(`LLM used for task parsing: ${llmUsed}`);
-      fastify.log.info(`Task details to be processed: ${JSON.stringify(taskDetails)}`);
-      fastify.log.info(`Intent detected: ${taskDetails.intent}, Task ID: ${taskDetails.task_id}`);
+      llmLogger.info({
+        requestId,
+        userId: request.user.id,
+        event: 'task_data_validated',
+        llmUsed,
+        intent: validatedTaskData.intent,
+        taskId: validatedTaskData.task_id,
+        usedFallback
+      }, 'Task data validated and ready for processing');
 
+      // SEPARATION OF RESPONSIBILITIES: Application logic decides database operations
+      // The LLM only suggests - the application enforces
       const dbClient = await pool.connect();
       try {
-        if (taskDetails.intent === "edit_task" && taskDetails.task_id) {
+        // Business logic validation: edit_task requires valid task_id
+        if (validatedTaskData.intent === "edit_task" && validatedTaskData.task_id) {
+          // Verify task exists and belongs to user before allowing edit
+          const verifyResult = await dbClient.query(
+            'SELECT id FROM tasks WHERE id = $1 AND user_id = $2',
+            [validatedTaskData.task_id, request.user.id]
+          );
+          
+          if (verifyResult.rowCount === 0) {
+            // Task doesn't exist or doesn't belong to user - fail closed to create_task
+            llmLogger.warn({
+              requestId,
+              userId: request.user.id,
+              event: 'intent_downgraded',
+              originalIntent: 'edit_task',
+              newIntent: 'create_task',
+              taskId: validatedTaskData.task_id,
+              reason: 'task_not_found_or_unauthorized',
+              securitySignal: 'INTENT_DOWNGRADE'
+            }, 'Task not found or unauthorized - failing closed to create_task');
+            
+            validatedTaskData.intent = 'create_task';
+            validatedTaskData.task_id = null;
+          }
+        }
+        
+        // Execute database operation based on validated intent
+        if (validatedTaskData.intent === "edit_task" && validatedTaskData.task_id) {
+          llmLogger.info({
+            requestId,
+            userId: request.user.id,
+            event: 'database_operation',
+            operation: 'update_task',
+            taskId: validatedTaskData.task_id
+          }, 'Executing task update operation');
+          
           const updateQuery = `
             UPDATE tasks
             SET
@@ -389,25 +572,60 @@ function buildApp() {
           const updateResult = await dbClient.query(
             updateQuery,
             [
-              taskDetails.task_name,
-              taskDetails.due_date,
-              taskDetails.is_completed,
-              taskDetails.original_request,
-              taskDetails.task_id,
+              validatedTaskData.task_name,
+              validatedTaskData.due_date,
+              validatedTaskData.is_completed,
+              validatedTaskData.original_request,
+              validatedTaskData.task_id,
               request.user.id
             ]
           );
 
           if (updateResult.rowCount === 0) {
+            llmLogger.error({
+              requestId,
+              userId: request.user.id,
+              event: 'database_operation_failed',
+              operation: 'update_task',
+              taskId: validatedTaskData.task_id,
+              reason: 'task_not_found'
+            }, 'Task update failed - task not found');
+            
             reply.status(404).send({ error: 'Task not found or user not authorized for update.' });
           } else {
+            llmLogger.info({
+              requestId,
+              userId: request.user.id,
+              event: 'database_operation_success',
+              operation: 'update_task',
+              taskId: updateResult.rows[0].id
+            }, 'Task updated successfully');
+            
             reply.status(200).send(updateResult.rows[0]);
           }
         } else {
+          // Default to create_task (fail-closed behavior)
+          llmLogger.info({
+            requestId,
+            userId: request.user.id,
+            event: 'database_operation',
+            operation: 'create_task',
+            isFailClosed: validatedTaskData.intent !== 'create_task'
+          }, 'Executing task creation operation');
+          
           const insertResult = await dbClient.query(
             'INSERT INTO tasks (id, user_id, task_name, due_date, is_completed, original_request) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5) RETURNING id, task_name, due_date, is_completed, original_request, is_archived',
-            [request.user.id, taskDetails.task_name, taskDetails.due_date, taskDetails.is_completed, taskDetails.original_request]
+            [request.user.id, validatedTaskData.task_name, validatedTaskData.due_date, validatedTaskData.is_completed, validatedTaskData.original_request]
           );
+          
+          llmLogger.info({
+            requestId,
+            userId: request.user.id,
+            event: 'database_operation_success',
+            operation: 'create_task',
+            taskId: insertResult.rows[0].id
+          }, 'Task created successfully');
+          
           reply.status(201).send(insertResult.rows[0]);
         }
       } catch (dbError) {
@@ -418,8 +636,14 @@ function buildApp() {
       }
 
     } catch (error) {
-      fastify.log.error('Error processing task from voice:', error);
-      fastify.log.error('Error stack:', error.stack);
+      llmLogger.error({
+        requestId,
+        userId: request.user?.id,
+        event: 'request_failed',
+        error: error.message,
+        stack: error.stack
+      }, 'Error processing task from voice');
+      
       reply.status(500).send({ error: 'Failed to process task from voice.', details: error.message });
     }
   });
@@ -438,11 +662,14 @@ function buildApp() {
         }, 3000);
       });
 
+      // Use reusable prompt template
+      const prompt = buildTaskSuggestionPrompt();
+      
       const openaiCallPromise = openai.chat.completions.create({
-        model: "gpt-3.5-turbo",
+        model: "gpt-4o-mini",
         messages: [{
           role: "user",
-          content: "Suggest a simple task for a todo list."
+          content: prompt
         }],
       });
 

@@ -91,23 +91,22 @@ function App() {
       recognitionRef.current.onresult = (event: any) => {
         const speechResult = event.results[0][0].transcript;
         setTranscript(speechResult);
-        // console.log('Speech Result:', speechResult); // Potentially sensitive user speech
+
         // Automatically send the speech result to the backend
         sendVoiceTranscriptToBackend(speechResult);
       };
 
       recognitionRef.current.onend = () => {
         setIsListening(false);
-        // console.log('Speech recognition ended.');
+
       };
 
       recognitionRef.current.onerror = (event: any) => {
-        console.error('Speech recognition error:', event.error);
         setIsListening(false);
         speakAmbiguousInput();
       };
     } else {
-      console.warn('Web Speech API not supported in this browser.');
+      // Speech recognition not available
     }
   }, []);
 
@@ -153,11 +152,9 @@ function App() {
         const data = await response.json();
         setTasks(sortTasks(data));
       } else {
-        console.error('Failed to fetch tasks', response.statusText);
         setTasks([]);
       }
     } catch (error) {
-      console.error('Error fetching tasks:', error);
       setTasks([]);
     }
   };
@@ -166,21 +163,20 @@ function App() {
     setPendingDeletionTask(taskToConfirm);
     setIsUILocked(true);
     // Placeholder for app speaking: "Are you sure you want to delete [Task]?"
-    // console.log(`App speaks: "Are you sure you want to delete [Task]?"`); // Sanitized task_name
+
     // Placeholder for opening mic for 10 seconds
-    // console.log('Opening mic for 10 seconds...');
+
   };
 
   const handleCancelDeleteConfirmation = () => {
     setPendingDeletionTask(null);
     setIsUILocked(false);
-    // console.log('Delete confirmation cancelled.');
+
   };
 
   const handleDeleteTask = async (taskId: string) => {
     const token = localStorage.getItem('jwt');
     if (!token) {
-      console.error('No JWT token found.');
       return;
     }
 
@@ -197,11 +193,11 @@ function App() {
         setPendingDeletionTask(null);
         setIsUILocked(false);
       } else {
-        console.error('Failed to delete task', response.statusText);
+
         alert('Failed to delete task. Please try again.');
       }
     } catch (error) {
-      console.error('Error deleting task:', error);
+
       alert('Error deleting task. Please try again.');
     }
   };
@@ -209,7 +205,6 @@ function App() {
   const handleToggleComplete = async (task: Task) => {
     const token = localStorage.getItem('jwt');
     if (!token) {
-      console.error('No JWT token found.');
       return;
     }
 
@@ -239,11 +234,9 @@ function App() {
         speakTaskCreated(); // Reuse for completion/incompletion feedback
       } else {
         const errorData = await response.json();
-        console.error('Failed to toggle task completion:', errorData.message);
         speakAmbiguousInput();
       }
     } catch (error) {
-      console.error('Error toggling task completion:', error);
       speakAmbiguousInput();
     }
   };
@@ -270,7 +263,7 @@ function App() {
       oscillator.start(audioContextRef.current.currentTime);
       oscillator.stop(audioContextRef.current.currentTime + duration / 1000);
     } else {
-      console.warn('AudioContext not initialized. Cannot play audio feedback.');
+      // AudioContext not available
     }
   };
 
@@ -312,7 +305,7 @@ function App() {
   const handleSaveTaskDescription = async (taskId: string, newTitle: string, newDescription: string, newDate: string) => {
     const token = localStorage.getItem('jwt');
     if (!token) {
-      console.error('No JWT token found.');
+
       alert('You must be logged in to save changes.');
       return;
     }
@@ -343,11 +336,11 @@ function App() {
         );
       } else {
         const errorData = await response.json();
-        console.error('Failed to save task:', errorData);
+
         alert('Failed to save task. Please try again.');
       }
     } catch (error) {
-      console.error('Error saving task:', error);
+
       alert('Failed to save task. Please try again.');
     }
   };
@@ -355,7 +348,6 @@ function App() {
   const sendVoiceTranscriptToBackend = async (transcript: string) => {
     const token = localStorage.getItem('jwt');
     if (!token) {
-      console.error('No JWT token found.');
       return;
     }
     try {
@@ -363,7 +355,7 @@ function App() {
       const clientDate = new Date(); // Get current date/time on client
       const clientTimezoneOffset = clientDate.getTimezoneOffset(); // Get timezone offset in minutes
 
-      // console.log('LLM Request:', { url: apiUrl, method: 'POST', body: { transcribedText: '[sanitized]', clientDate: clientDate.toISOString(), clientTimezoneOffset } }); // Sanitized transcribedText
+
       const response = await fetch(apiUrl, {
         method: 'POST',
         headers: {
@@ -375,8 +367,7 @@ function App() {
 
       if (response.ok) {
         const taskData = await response.json();
-        // console.log('LLM Response (Success): [sanitized]'); // Sanitized LLM response data
-        
+
         // Handle both create (201) and update (200) responses
         if (response.status === 201) {
           // New task created - add to list
@@ -387,18 +378,14 @@ function App() {
             task.id === taskData.id ? taskData : task
           )));
         }
-        
+
         setTranscript(''); // Clear the transcript input
         speakTaskCreated();
       } else {
         const errorData = await response.json();
-        console.error('LLM Response (Error):', errorData); // Log the LLM's error response
-        console.error('Failed to create task from voice input:', errorData.message);
-
         speakAmbiguousInput();
       }
     } catch (error) {
-      console.error('Error sending voice transcript to backend:', error);
       alert('Error communicating with the backend to create task.');
     }
   };

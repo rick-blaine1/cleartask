@@ -1,11 +1,17 @@
 # Logs
 logs
+logs/
 *.log
+*.log.*
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
+pino-*.log
+llm-*.log
+backend/logs/
+frontend/logs/
 
 node_modules
 **/node_modules

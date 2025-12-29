@@ -17,7 +17,6 @@ export function speak(
   }
 ): void {
   if (!('speechSynthesis' in window)) {
-    console.warn('Web Speech API (SpeechSynthesis) not supported in this browser.');
     return;
   }
 
