@@ -822,7 +822,7 @@ if (process.env.NODE_ENV !== 'test') {
         app.log.info('Creating users table...');
         await client.query(`
           CREATE TABLE IF NOT EXISTS users (
-            id VARCHAR(255) PRIMARY KEY,
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             email VARCHAR(255) NOT NULL,
             name VARCHAR(255),
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -865,6 +865,26 @@ if (process.env.NODE_ENV !== 'test') {
         await client.query(`CREATE INDEX IF NOT EXISTS idx_tasks_due_date ON tasks(due_date);`);
         await client.query(`CREATE INDEX IF NOT EXISTS idx_tasks_is_archived ON tasks(is_archived);`);
         app.log.info('Tasks indexes created successfully');
+
+        // Create email_inbox table
+        app.log.info('Creating email_inbox table...');
+        await client.query(`
+          CREATE TABLE IF NOT EXISTS email_inbox (
+              id SERIAL PRIMARY KEY,
+              user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+              email_address VARCHAR(255) UNIQUE NOT NULL,
+              access_token TEXT NOT NULL,
+              refresh_token TEXT NOT NULL,
+              last_sync_at TIMESTAMP WITH TIME ZONE,
+              created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+          );
+        `);
+        app.log.info('Email inbox table created successfully');
+
+        app.log.info('Creating email_inbox indexes...');
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_email_inbox_user_id ON email_inbox (user_id);`);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_email_inbox_email_address ON email_inbox (email_address);`);
+        app.log.info('Email inbox indexes created successfully');
 
         app.log.info('Database schema initialized successfully');
       } finally {

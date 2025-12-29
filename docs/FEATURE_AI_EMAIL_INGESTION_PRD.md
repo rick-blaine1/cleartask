@@ -96,6 +96,15 @@ Mail-to-Task will act as a personal executive-function assistant, interpreting u
 *   **Database:** PostgreSQL.
 *   **LLM Integration:** `gpt-4o-mini` via Requesty.ai, with OpenAI `gpt-4o-mini` as a fallback. Existing LLM credentials from voice task creation will be reused.
 *   **Email API:** Gmail API.
+*   **Transactional Email Service:** Resend (for magic link delivery).
+    *   **Daily Limit:** Hard limit of 90 emails per UTC day to comply with Resend's free tier constraints.
+    *   **Rate Limiting Implementation:** A daily sentinel mechanism shall track email sends via a `system_email_ledger` table (or similar) with `sent_at` and `purpose` fields.
+    *   **Pre-flight Check:** Before sending any email, the system shall query the ledger to count emails sent in the current UTC day.
+    *   **Limit Enforcement:** If the count is >= 90, the system shall reject the request with a `DailyLimitReachedError` and return HTTP 503 (Service Unavailable).
+    *   **User Experience When Limit Reached:**
+        *   Registration attempts shall be blocked.
+        *   The frontend shall display a maintenance-style message: "Email service temporarily unavailable. Daily limit reached. Resets at midnight UTC (HH:MM your time)."
+        *   The message shall include a countdown timer showing time remaining until midnight UTC in the user's local timezone.
 *   **Frontend:** React, TypeScript, Dexie.js (for IndexedDB).
 
 ## 8. Success Metrics
