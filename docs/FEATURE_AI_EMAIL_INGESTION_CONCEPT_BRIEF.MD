@@ -23,7 +23,7 @@ Instead of forcing users to read, parse, and manually re-enter work from an inbo
 
 * **Auto-Create by Default:** All forwarded emails result in task creation. No confirmation required.
 * **User-Centric Interpretation:** AI extracts tasks based on what the *user* needs to do, ignoring sender-side framing (e.g., “FYI” vs “Urgent”).
-* **Accessibility First:** Workflows must not rely on precise visual scanning or manual inline editing at creation time.
+*   **Accessibility First:** Initial task creation workflows must not rely on precise visual scanning or manual inline editing. Post-creation editing of tasks is fully supported for refinement and correction.
 * **Predictable Over Perfect:** Consistent behavior and easy recoverability (deletion/editing) are prioritized over semantic perfection.
 * **Granularity over Consolidation:** Distinct requests are split into individual tasks to ensure each item is independently actionable and trackable.
 
@@ -39,11 +39,11 @@ Instead of forcing users to read, parse, and manually re-enter work from an inbo
 
 ### 4.2 Extraction & Naming Rules
 
-* **Task Naming (Standard):** `[Action] for [Person]`.
+*   **Task Naming (Standard):** LLM should generate task names following the pattern `[Action] for [Person]`, limited to 250 characters, with temporal expressions removed.
 * **Multi-Party Logic:** If Sam asks the user to contact Martha, the task is named: `"Ask Martha to [Action] for Sam"`.
 * **Attachment Handling:** If an email contains or references an attachment, the title must explicitly state: `"Check [Attachment Type] from [Sender] re: [Original Subject]"`.
 * **Multi-Task Splitting:** If an email contains 5 distinct "to-dos," the system creates **5 separate tasks**. This prevents "hidden" work inside a single task description.
-* **Informational Catch-All:** If no clear action is found, a task titled `"Review email from [Sender]: [Subject]"` is created if the email references a future decision or dependency.
+*   **Informational Catch-All / Safe Fallback:** If no clear action is found, or if AI extraction fails validation, a task titled `"Review email from [Sender]: [Subject]"` is created. The system's `createSafeFallbackTask` mechanism ensures a minimal task (`"Review email: [Subject]"` or from `original_request`) is always created if the LLM output is malformed or no clear action is identified.
 
 ---
 
@@ -58,7 +58,7 @@ To prevent list clutter and cognitive overhead, the system implements a **24-hou
 ### 5.2 Prompt Injection Defense
 
 * **Sentinel Model:** A guardrail LLM detects instruction-override attempts (e.g., "Ignore previous instructions").
-* **Salted XML Wrapping:** Untrusted content is enclosed in randomized tags (e.g., `<email_body_hash123>`).
+*   **Delimited Input Wrapping:** Untrusted content is enclosed in explicit delimiters (e.g., `<USER_INPUT_START>`, `<USER_INPUT_END>`) and processed by `sanitizeUserInput` to prevent injection.
 * **Semantic Reframing:** AI is instructed to treat all sender claims (e.g., "High Priority") as informational data points, not system commands.
 
 ---
@@ -67,12 +67,16 @@ To prevent list clutter and cognitive overhead, the system implements a **24-hou
 
 ### 7.1 Backend Integration
 
-* **Ingestion:** Event-driven polling of Gmail API.
-* **User Mapping:** Match `From` address against `verified_emails` table.
+* **Ingestion:** Event-driven polling of Gmail API, feeding into a dedicated `/api/email-ingestion` endpoint.
+*   **User Mapping:** Each user will explicitly configure and independently verify 'From' email addresses they wish to watch. The system will match the incoming email's `From` address against these user-configured and verified watch-lists.
 * **Failure Handling:** If AI extraction fails, a minimal fallback task is created: `"Review forwarded email: [Subject]"`.
-* **Metadata Storage:** `Message-ID` is stored to support de-duplication. Raw `Subject` and `Body` are stored for internal debugging only.
+*   **Metadata Storage:** `Message-ID` will be stored as a direct field on the `tasks` table for de-duplication. Raw `Subject` and `Body` are stored in the `original_request` field for internal debugging only.
 
-### 7.2 Data Schema (Example)
+### 7.2 LLM Model Preference
+
+*   **Model:** Utilize `gpt-4o-mini` for all OpenAI model interactions, adhering to project standards.
+
+### 7.3 Data Schema (Example)
 
 ```json
 {
@@ -81,10 +85,8 @@ To prevent list clutter and cognitive overhead, the system implements a **24-hou
     {
       "task_name": "Ask Martha to send Sam the file",
       "due_date": "2025-12-30T17:00:00Z",
-      "metadata": {
-        "message_id": "abc-123",
-        "debug_body_id": "ref_999"
-      }
+      "message_id": "abc-123",
+      "original_request": "Full raw email body and subject for debug/context."
     }
   ]
 }
