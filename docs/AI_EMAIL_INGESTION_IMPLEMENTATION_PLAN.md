@@ -49,7 +49,7 @@ This document outlines a multi-phase implementation plan for the AI Email Ingest
     *   Implement authorization checks to ensure users can only manage their own authorized sender configurations.
 *   **TDD (Small):**
     *   Write unit tests for database schema migrations.
-    *   Write integration tests for authentication middleware on dummy endpoints.
+    *   [x] Write integration tests for authentication middleware on dummy endpoints.
 
 **Deliverables:**
 *   Updated database schema.
@@ -72,35 +72,35 @@ This document outlines a multi-phase implementation plan for the AI Email Ingest
 **Tasks:**
 *   **Gmail API Integration (Medium):**
     *   **Gmail Push Notification Setup (Medium):**
-    *   Configure a Google Cloud Pub/Sub Topic to receive notifications from the app-owned Gmail account.
-    *   Grant the Gmail API permission to publish to this topic.
-    *   Implement a Webhook Endpoint (POST /api/email-webhook) to receive push notifications from Google.
+    *   [x] Configure a Google Cloud Pub/Sub Topic to receive notifications from the app-owned Gmail account.
+    *   [x] Grant the Gmail API permission to publish to this topic.
+    *   [x] Implement a Webhook Endpoint (POST /api/email-webhook) to receive push notifications from Google.
 *   **Email Retrieval Service (Small):**
-    *   Upon receiving a webhook notification, fetch only the specific message(s) identified by the notification to minimize API overhead.
-    *   Implement a "Sync" fallback that runs every 30 minutes in case a push notification is missed.
-    *   Develop a service to fetch email content (subject, body, message-ID, sender) from Gmail API.
+    *   [x] Upon receiving a webhook notification, fetch only the specific message(s) identified by the notification to minimize API overhead.
+    *   [x] Implement a "Sync" fallback that runs every 30 minutes in case a push notification is missed.
+    *   [x] Develop a service to fetch email content (subject, body, message-ID, sender) from Gmail API.
 *   **`/api/email-ingestion` Endpoint (Small):**
-    *   Create a new `POST /api/email-ingestion` endpoint to receive email data.
-    *   Endpoint should validate incoming email data against schema.
+    *   [x] Create a new `POST /api/email-ingestion` endpoint to receive email data.
+    *   [x] Endpoint should validate incoming email data against schema.
 *   **Registered Sender Verification (Medium):**
-    *   Implement backend logic for a magic link verification flow to confirm "Registered Sender" email addresses.
-    *   Develop a temporary token generation and verification system for magic links.
+    *   [x] Implement backend logic for a magic link verification flow to confirm "Registered Sender" email addresses.
+    *   [x] Develop a temporary token generation and verification system for magic links.
     *   **Temporary Token Characteristics (Medium):**
         *   Structure: Use a cryptographically secure UUID (v4) or a high-entropy random string stored in the database, rather than a JWT, to ensure easy revocation.
-    *   Store verified sender emails in the `user_authorized_senders` table. This table will now store all email addresses a user has registered and verified, not necessarily associated with a user's own email account.
+    *   [x] Store verified sender emails in the `user_authorized_senders` table. This table will now store all email addresses a user has registered and verified, not necessarily associated with a user's own email account.
 *   **Email Pre-processing (Small):**
     *   Crucially, the application will *not* directly access user inboxes. Instead, all emails must be forwarded by the user to a *single, app-owned Gmail address*.
-    *   When an email arrives, the application will check if the sender's email address (the 'From' address) is one of the *verified registered sender email addresses* associated with any user.
-    *   Implement truncation logic for `original_request` to 30000 characters, prioritizing subject then body, with ellipsis.
+    *   [x] When an email arrives, the application will check if the sender's email address (the 'From' address) is one of the *verified registered sender email addresses* associated with any user.
+    *   [x] Implement truncation logic for `original_request` to 30000 characters, prioritizing subject then body, with ellipsis.
 *   **De-duplication Logic (Small):**
-    *   Implement the 24-hour `Message-ID` lock: check `email_processing_lock` table before processing any email.
-    *   Add `Message-ID` to the `email_processing_lock` table upon successful processing.
+    *   [x] Implement the 24-hour `Message-ID` lock: check `email_processing_lock` table before processing any email.
+    *   [x] Add `Message-ID` to the `email_processing_lock` table upon successful processing.
 *   **TDD (Medium):**
-    *   Write unit tests for Gmail API parsing and data extraction.
-    *   Write integration tests for the `/api/email-ingestion` endpoint, including invalid input handling.
-    *   Write unit tests for email pre-processing (signature stripping, truncation).
-    *   Write unit and integration tests for `Message-ID` de-duplication logic.
-    *   Write end-to-end tests for the magic link verification flow.
+    *   [x] Write unit tests for Gmail API parsing and data extraction.
+    *   [x] Write integration tests for the `/api/email-ingestion` endpoint, including invalid input handling.
+    *   [x] Write unit tests for email pre-processing (signature stripping, truncation).
+    *   [x] Write unit and integration tests for `Message-ID` de-duplication logic.
+    *   [x] Write end-to-end tests for the magic link verification flow.
 
 **Deliverables:**
 *   Functional Gmail API integration for email retrieval.

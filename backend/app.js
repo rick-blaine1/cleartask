@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import Fastify from 'fastify';
 import pg from 'pg';
 import fastifyJwt from '@fastify/jwt';
@@ -8,6 +9,12 @@ import { processUserInput } from './inputProcessor.js';
 import { buildTaskParsingPrompt, buildTaskSuggestionPrompt, sanitizeUserInput } from './promptTemplates.js';
 import { validateLLMTaskOutput, createSafeFallbackTask, sanitizeForDatabase } from './src/schemas/task.schema.js';
 import { llmLogger } from './utils/llmLogger.js';
+import emailIngestionRoutes from './src/email_ingestion/index.js';
+import crypto from 'crypto';
+import nodemailer from 'nodemailer';
+import { emailVerificationSchema } from './src/schemas/email.schema.js';
+
+const EMAIL_VERIFICATION_TOKEN_EXPIRATION_HOURS = 24;
 
 function buildApp() {
   const fastify = Fastify({ logger: true });
@@ -79,11 +86,11 @@ function buildApp() {
 
   const { Pool } = pg;
   const pool = new Pool({
-    user: process.env.DB_USER || 'user',
-    host: process.env.DB_HOST || 'localhost',
-    database: process.env.DB_NAME || 'cleartaskdb',
-    password: process.env.DB_PASSWORD || 'password',
-    port: process.env.DB_PORT || 5432,
+    user: process.env.POSTGRES_USER || 'user',
+    host: process.env.POSTGRES_HOST || 'localhost',
+    database: process.env.POSTGRES_DB || 'cleartaskdb',
+    password: process.env.POSTGRES_PASSWORD || 'password',
+    port: process.env.POSTGRES_PORT || 5432,
   });
 
   // Expose pool for initialization
@@ -106,6 +113,116 @@ function buildApp() {
       request.user.id = request.user.userId;
     } catch (err) {
       reply.send(err)
+    }
+  });
+
+  fastify.register(emailIngestionRoutes, { pool });
+
+  // Endpoint to request a magic link for email verification
+  fastify.post('/api/email-ingestion/request-magic-link', { onRequest: [fastify.authenticate] }, async (request, reply) => {
+    const client = await pool.connect();
+    try {
+      const { email } = request.body;
+      emailVerificationSchema.parse({ email });
+
+      const userId = request.user.id;
+
+      // Check if the email is already verified for this user
+      const existingVerifiedSender = await client.query(
+        'SELECT id FROM user_authorized_senders WHERE user_id = $1 AND email_address = $2 AND is_verified = TRUE',
+        [userId, email]
+      );
+
+      if (existingVerifiedSender.rowCount > 0) {
+        return reply.status(200).send({ message: 'Email is already verified.' });
+      }
+
+      // Generate a unique token
+      const token = crypto.randomBytes(32).toString('hex');
+      const expiresAt = new Date();
+      expiresAt.setHours(expiresAt.getHours() + EMAIL_VERIFICATION_TOKEN_EXPIRATION_HOURS);
+
+      // Store the token in the database
+      await client.query(
+        'INSERT INTO email_verification_tokens (user_id, email, token, expires_at) VALUES ($1, $2, $3, $4)',
+        [userId, email, token, expiresAt]
+      );
+
+      // In a real application, send an email with the magic link
+      // For now, we'll log it
+      const magicLink = `${process.env.FRONTEND_URL}/verify-email?token=${token}`;
+      fastify.log.info(`Magic link for ${email}: ${magicLink}`);
+
+      // TODO: Implement actual email sending using nodemailer
+      // const transporter = nodemailer.createTransport({
+      //   host: process.env.EMAIL_HOST,
+      //   port: process.env.EMAIL_PORT,
+      //   secure: process.env.EMAIL_SECURE === 'true',
+      //   auth: {
+      //     user: process.env.EMAIL_USER,
+      //     pass: process.env.EMAIL_PASS,
+      //   },
+      // });
+      //
+      // await transporter.sendMail({
+      //   from: 'noreply@your-app.com',
+      //   to: email,
+      //   subject: 'Verify your email address',
+      //   html: `<p>Click <a href=\"${magicLink}\">here</a> to verify your email address.</p>`,
+      // });
+
+      reply.status(200).send({ message: 'Magic link sent to your email address.' });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        fastify.log.warn('Request magic link validation failed:', error.errors);
+        return reply.status(400).send({ message: 'Validation failed', errors: error.errors });
+      } else {
+        fastify.log.error('Error requesting magic link:', error);
+        reply.status(500).send({ message: 'Failed to request magic link.', details: error.message });
+      }
+    } finally {
+      client.release();
+    }
+  });
+
+  // Endpoint to verify the magic link
+  fastify.get('/api/email-ingestion/verify-magic-link', async (request, reply) => {
+    const client = await pool.connect();
+    try {
+      const { token } = request.query;
+      if (!token) {
+        return reply.status(400).send({ message: 'Token is required.' });
+      }
+
+      const result = await client.query(
+        'SELECT * FROM email_verification_tokens WHERE token = $1 AND used_at IS NULL AND expires_at > NOW()',
+        [token]
+      );
+
+      if (result.rowCount === 0) {
+        return reply.status(400).send({ message: 'Invalid, expired, or already used magic link.' });
+      }
+
+      const { user_id, email } = result.rows[0];
+
+      // Mark the token as used
+      await client.query(
+        'UPDATE email_verification_tokens SET used_at = NOW() WHERE token = $1',
+        [token]
+      );
+
+      // Add or update the user_authorized_senders table
+      await client.query(
+        'INSERT INTO user_authorized_senders (user_id, email_address, is_verified) VALUES ($1, $2, TRUE) ON CONFLICT (email_address) DO UPDATE SET user_id = EXCLUDED.user_id, is_verified = TRUE, created_at = NOW()',
+        [user_id, email]
+      );
+
+      reply.status(200).send({ message: 'Email verified successfully.' });
+    } catch (error) {
+      fastify.log.error('Error verifying magic link:', error);
+      reply.status(500).send({ message: 'Failed to verify magic link.', details: error.message });
+    } finally {
+      client.release();
     }
   });
 
@@ -564,10 +681,11 @@ function buildApp() {
               task_name = COALESCE($1, task_name),
               due_date = COALESCE($2, due_date),
               is_completed = COALESCE($3, is_completed),
-              original_request = $4,
+              original_request = COALESCE($4, original_request),
+              message_id = COALESCE($5, message_id),
               updated_at = CURRENT_TIMESTAMP
-            WHERE id = $5 AND user_id = $6
-            RETURNING id, task_name, due_date, is_completed, original_request, is_archived;
+            WHERE id = $6 AND user_id = $7
+            RETURNING id, task_name, due_date, is_completed, original_request, is_archived, message_id;
           `;
           const updateResult = await dbClient.query(
             updateQuery,
@@ -576,6 +694,7 @@ function buildApp() {
               validatedTaskData.due_date,
               validatedTaskData.is_completed,
               validatedTaskData.original_request,
+              validatedTaskData.message_id,
               validatedTaskData.task_id,
               request.user.id
             ]
@@ -766,6 +885,35 @@ function buildApp() {
   });
 
   // Catch-all route for debugging 404s
+  fastify.post('/api/email-webhook', async (request, reply) => {
+    // This endpoint receives push notifications from Google Cloud Pub/Sub.
+    // The message is Base64-encoded within the 'message.data' field of the Pub/Sub message.
+    
+    fastify.log.info('Received Google Pub/Sub webhook notification.');
+    fastify.log.debug(`Webhook payload: ${JSON.stringify(request.body)}`);
+
+    try {
+      if (!request.body || !request.body.message || !request.body.message.data) {
+        fastify.log.warn('Invalid Pub/Sub message format received.');
+        return reply.status(400).send({ error: 'Invalid Pub/Sub message format.' });
+      }
+
+      const pubsubMessage = request.body.message;
+      const data = Buffer.from(pubsubMessage.data, 'base64').toString('utf8');
+      const jsonData = JSON.parse(data);
+
+      fastify.log.info(`Decoded Pub/Sub message data: ${JSON.stringify(jsonData)}`);
+      // TODO: Implement logic to process the email notification (e.g., fetch email, update sync state)
+
+      // Acknowledge the message. Pub/Sub push subscriptions expect a 200 OK to acknowledge.
+      reply.status(200).send('OK');
+
+    } catch (error) {
+      fastify.log.error(`Error processing webhook: ${error.message}`);
+      reply.status(500).send({ error: 'Internal Server Error', details: error.message });
+    }
+  });
+
   fastify.setNotFoundHandler((request, reply) => {
     fastify.log.warn(`=== 404 Not Found ===`);
     fastify.log.warn(`Method: ${request.method}`);
@@ -794,13 +942,24 @@ if (process.env.NODE_ENV !== 'test') {
       for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
           app.log.info(`Attempting to connect to database (attempt ${attempt}/${maxRetries})...`);
-          app.log.info(`Database config: host=${process.env.DB_HOST}, database=${process.env.DB_NAME}, user=${process.env.DB_USER}`);
+          app.log.info(`Database config from docker-compose: host=${process.env.DB_HOST}, database=${process.env.DB_NAME}, user=${process.env.DB_USER}, port=${process.env.DB_PORT}`);
+          app.log.info(`Database config from .env: host=${process.env.POSTGRES_HOST}, database=${process.env.POSTGRES_DB}, user=${process.env.POSTGRES_USER}, port=${process.env.POSTGRES_PORT}`);
+          app.log.info(`Pool will use: host=${process.env.POSTGRES_HOST || 'localhost'}, database=${process.env.POSTGRES_DB || 'cleartaskdb'}, user=${process.env.POSTGRES_USER || 'user'}, port=${process.env.POSTGRES_PORT || 5432}`);
           
           const client = await app.pool.connect();
           app.log.info('Successfully connected to database');
           return client;
         } catch (error) {
           app.log.warn(`Database connection attempt ${attempt} failed: ${error.message}`);
+          app.log.warn(`Error details: ${JSON.stringify({
+            code: error.code,
+            errno: error.errno,
+            syscall: error.syscall,
+            hostname: error.hostname,
+            address: error.address
+          })}`);
+          app.log.warn(`Stack trace: ${error.stack}`);
+
           
           if (attempt === maxRetries) {
             throw new Error(`Failed to connect to database after ${maxRetries} attempts: ${error.message}`);
@@ -846,6 +1005,7 @@ if (process.env.NODE_ENV !== 'test') {
             due_date DATE,
             is_completed BOOLEAN DEFAULT FALSE,
             original_request TEXT,
+            message_id VARCHAR(255),
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             is_archived BOOLEAN DEFAULT FALSE
@@ -858,12 +1018,27 @@ if (process.env.NODE_ENV !== 'test') {
           ALTER TABLE tasks
           ADD COLUMN IF NOT EXISTS description TEXT;
         `);
+
+        // Add message_id column if it doesn't exist
+        app.log.info('Adding message_id column if it doesn\'t exist...');
+        await client.query(`
+          ALTER TABLE tasks
+          ADD COLUMN IF NOT EXISTS message_id VARCHAR(255);
+        `);
+
+        // Add original_request column if it doesn't exist
+        app.log.info('Adding original_request column if it doesn\'t exist...');
+        await client.query(`
+          ALTER TABLE tasks
+          ADD COLUMN IF NOT EXISTS original_request TEXT;
+        `);
         app.log.info('Tasks table created successfully');
         
         app.log.info('Creating tasks indexes...');
         await client.query(`CREATE INDEX IF NOT EXISTS idx_tasks_user_id ON tasks(user_id);`);
         await client.query(`CREATE INDEX IF NOT EXISTS idx_tasks_due_date ON tasks(due_date);`);
         await client.query(`CREATE INDEX IF NOT EXISTS idx_tasks_is_archived ON tasks(is_archived);`);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_tasks_message_id ON tasks(message_id);`);
         app.log.info('Tasks indexes created successfully');
 
         // Create email_inbox table
@@ -885,6 +1060,58 @@ if (process.env.NODE_ENV !== 'test') {
         await client.query(`CREATE INDEX IF NOT EXISTS idx_email_inbox_user_id ON email_inbox (user_id);`);
         await client.query(`CREATE INDEX IF NOT EXISTS idx_email_inbox_email_address ON email_inbox (email_address);`);
         app.log.info('Email inbox indexes created successfully');
+
+        // Create user_authorized_senders table
+        app.log.info('Creating user_authorized_senders table...');
+        await client.query(`
+          CREATE TABLE IF NOT EXISTS user_authorized_senders (
+            id SERIAL PRIMARY KEY,
+            user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            email_address VARCHAR(255) UNIQUE NOT NULL,
+            is_verified BOOLEAN DEFAULT FALSE,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+          );
+        `);
+        app.log.info('User authorized senders table created successfully');
+
+        app.log.info('Creating user_authorized_senders indexes...');
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_user_authorized_senders_user_id ON user_authorized_senders (user_id);`);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_user_authorized_senders_email_address ON user_authorized_senders (email_address);`);
+        app.log.info('User authorized senders indexes created successfully');
+
+        // Create email_verification_tokens table for magic link
+        app.log.info('Creating email_verification_tokens table...');
+        await client.query(`
+          CREATE TABLE IF NOT EXISTS email_verification_tokens (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            email VARCHAR(255) NOT NULL,
+            token VARCHAR(255) UNIQUE NOT NULL,
+            expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+            used_at TIMESTAMP WITH TIME ZONE,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+          );
+        `);
+        app.log.info('Email verification tokens table created successfully');
+
+        app.log.info('Creating email_verification_tokens indexes...');
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_email_verification_tokens_user_id ON email_verification_tokens (user_id);`);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_email_verification_tokens_token ON email_verification_tokens (token);`);
+        app.log.info('Email verification tokens indexes created successfully');
+
+        // Create email_processing_lock table
+        app.log.info('Creating email_processing_lock table...');
+        await client.query(`
+          CREATE TABLE IF NOT EXISTS email_processing_lock (
+            message_id VARCHAR(255) PRIMARY KEY,
+            processed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+          );
+        `);
+        app.log.info('Email processing lock table created successfully');
+
+        app.log.info('Creating email_processing_lock index...');
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_email_processing_lock_message_id ON email_processing_lock (message_id);`);
+        app.log.info('Email processing lock index created successfully');
 
         app.log.info('Database schema initialized successfully');
       } finally {
