@@ -1,21 +1,24 @@
 # Product Requirements Document: AI-Driven Email Ingestion (Mail-to-Task)
 
-**Status:** Draft v1.0
+**Status:** Draft v1.1
 
-**Date:** 2025-12-29
+**Date:** 2026-01-02
 
 **Author:** AI Agent Roo
 
 ## 1. Introduction
 
-This document outlines the product requirements for the "AI-Driven Email Ingestion" feature, also known as "Mail-to-Task." The primary goal is to enable users to automatically convert forwarded emails into actionable tasks within the personal task-tracking web application. This feature prioritizes accessibility and predictable automation, especially for users with low vision, by minimizing the need for manual review or visual confirmation during task creation.
+This document outlines the product requirements for the "AI-Driven Email Ingestion" feature, also known as "Mail-to-Task." The primary goal is to enable users to automatically convert emails sent to a single, app-owned Gmail inbox into actionable tasks within the personal task-tracking web application. This feature prioritizes accessibility and predictable automation, especially for users with low vision, by minimizing the need for manual review or visual confirmation during task creation.
+
+**Architecture Model:** The system monitors a **single, app-owned Gmail inbox** (configured via `GMAIL_APP_EMAIL`). Users send or forward emails to this address, and the system verifies the sender against their list of authorized senders before processing. There is **no per-user email inbox watching** functionality.
 
 ## 2. Goals
 
-*   Automate task creation from forwarded emails.
+*   Automate task creation from emails sent to the app's Gmail inbox.
 *   Reduce cognitive and visual effort for users in managing email-based tasks.
 *   Provide a reliable and predictable system for task extraction and assignment.
 *   Ensure high accessibility by avoiding visual-heavy workflows for initial task creation.
+*   Verify sender identity to ensure only authorized users can create tasks via email.
 
 ## 3. Value Proposition
 
@@ -23,27 +26,37 @@ Mail-to-Task will act as a personal executive-function assistant, interpreting u
 
 ## 4. Product Principles
 
-*   **Auto-Create by Default:** All forwarded emails will result in task creation without explicit user confirmation.
+*   **Auto-Create by Default:** All emails from verified senders will result in task creation without explicit user confirmation.
 *   **User-Centric Interpretation:** AI will prioritize the user's implicit and explicit intent when extracting tasks, disregarding sender-side framing.
 *   **Accessibility First:** Initial task creation workflows will not rely on precise visual scanning or manual inline editing. Post-creation editing is fully supported.
 *   **Predictable Over Perfect:** Consistency in behavior and easy recoverability (deletion/editing) are prioritized over semantic perfection in AI extraction.
 *   **Granularity over Consolidation:** Distinct requests within an email will be split into individual, independently actionable tasks.
+*   **Sender Verification:** Only emails from verified authorized senders are processed for security.
 
 ## 5. Functional Requirements
 
 ### 5.1 Email Ingestion
 
-*   The system shall integrate with the Gmail API for event-driven polling of user-configured email accounts.
+**Architecture Model:**
+*   The system monitors a **single, app-owned Gmail inbox** (configured via `GMAIL_APP_EMAIL`).
+*   Users send or forward emails to this app-owned address.
+*   The system verifies the sender's email address against the user's list of authorized senders before processing.
+*   **No per-user inbox watching:** The system does NOT directly access or monitor individual user email accounts.
+*   **No `email_inbox` table:** There is no database table for tracking user-specific email inbox configurations or cron jobs for user-specific syncing.
+
+**Functional Requirements:**
+*   The system shall integrate with the Gmail API to monitor the app-owned Gmail inbox.
+*   A webhook endpoint (`/email-ingestion/webhook`) shall receive push notifications from Gmail for the app's inbox.
 *   A dedicated backend endpoint (`/api/email-ingestion`) shall receive and process incoming email data.
-*   Users shall be able to configure and independently verify "From" email addresses they wish to monitor for task creation.
+*   Users shall be able to configure and independently verify "Authorized Sender" email addresses.
 
     * Verified Ingestion Sources: Users shall be able to configure a list of "Authorized Sender" email addresses.
     * Magic Link Verification Flow: To verify a new address, the system shall send a Magic Link to that address.
     * Accessibility Requirement (Email Content): The verification email must use a large, high-contrast action button (minimum 4.5:1 ratio) and provide the full URL in plain text as a fallback.
     * Accessibility Requirement (Link Text): The link must be descriptively labeled (e.g., "Verify [Email Address] for Task Creation") to assist screen reader users navigating by links.
     * Verification Success: Upon clicking the link, the user shall be redirected to a "Success" landing page in the web app that uses a large-scale visual confirmation and an ARIA-live region to announce "Email Verified Successfully" to screen readers.
-    * Security: Only emails received from these verified "Authorized Senders" will be processed by the /api/email-ingestion endpoint.
-*   The system shall match incoming email's `From` address against user-configured and verified watch-lists.
+    * Security: Only emails from verified "Authorized Senders" will be processed.
+*   The system shall match incoming email's `From` address against all users' authorized sender lists to determine which user(s) should receive the task.
 
 ### 5.2 Task Extraction and Naming
 

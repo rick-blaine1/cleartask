@@ -1294,26 +1294,6 @@ if (process.env.NODE_ENV !== 'test') {
         await client.query(`CREATE INDEX IF NOT EXISTS idx_tasks_message_id ON tasks(message_id);`);
         app.log.info('Tasks indexes created successfully');
 
-        // Create email_inbox table
-        app.log.info('Creating email_inbox table...');
-        await client.query(`
-          CREATE TABLE IF NOT EXISTS email_inbox (
-              id SERIAL PRIMARY KEY,
-              user_id VARCHAR(255) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-              email_address VARCHAR(255) UNIQUE NOT NULL,
-              access_token TEXT NOT NULL,
-              refresh_token TEXT NOT NULL,
-              last_sync_at TIMESTAMP WITH TIME ZONE,
-              created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-          );
-        `);
-        app.log.info('Email inbox table created successfully');
-
-        app.log.info('Creating email_inbox indexes...');
-        await client.query(`CREATE INDEX IF NOT EXISTS idx_email_inbox_user_id ON email_inbox (user_id);`);
-        await client.query(`CREATE INDEX IF NOT EXISTS idx_email_inbox_email_address ON email_inbox (email_address);`);
-        app.log.info('Email inbox indexes created successfully');
-
         // Create user_authorized_senders table
         app.log.info('Creating user_authorized_senders table...');
         await client.query(`

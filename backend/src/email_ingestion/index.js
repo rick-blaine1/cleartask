@@ -4,10 +4,9 @@ import { emailIngestionSchema } from '../schemas/email.schema.js';
 import { google } from 'googleapis';
 import { isSenderVerified } from './emailVerification.js';
 import { isMessageIdLocked, addMessageIdToLockTable } from './messageIdService.js';
-import cron from 'node-cron';
 
 export async function fetchEmailContent(emailAddress, messageId) {
-  // Existing implementation of fetchEmailContent
+  // Fetch email content using app-owned Gmail credentials
   try {
     const oAuth2Client = new google.auth.OAuth2(
       process.env.GMAIL_CLIENT_ID,
@@ -19,8 +18,10 @@ export async function fetchEmailContent(emailAddress, messageId) {
 
     const gmail = google.gmail({ version: 'v1', auth: oAuth2Client });
 
+    // Use app's email address for fetching messages
+    const appEmail = process.env.GMAIL_APP_EMAIL || emailAddress;
     const fullMessage = await gmail.users.messages.get({
-      userId: emailAddress,
+      userId: appEmail,
       id: messageId,
       format: 'full',
     });
@@ -149,10 +150,12 @@ async function emailIngestionRoutes(fastify, options) {
     reply.send({ message: `Authorized sender ${id} retrieved successfully.`, data: dummyAuthorizedSender });
   });
 
+  // Gmail push notification webhook for app's monitored email account
   fastify.post('/email-ingestion/webhook', async (request, reply) => {
     try {
       const { message } = request.body;
       if (!message || !message.data) {
+        fastify.log.warn('Invalid webhook notification: missing message data');
         return reply.status(400).send({ message: 'Invalid webhook notification: missing message data.' });
       }
 
@@ -160,26 +163,36 @@ async function emailIngestionRoutes(fastify, options) {
       const { emailAddress, historyId } = JSON.parse(decodedData);
 
       if (!emailAddress || !historyId) {
+        fastify.log.warn('Invalid decoded message data: missing emailAddress or historyId');
         return reply.status(400).send({ message: 'Invalid decoded message data: missing emailAddress or historyId.' });
       }
 
-      // In a real scenario, you would retrieve the user's Gmail API credentials
-      // (e.g., access token, refresh token) based on `emailAddress` from your database.
-      // For this implementation, we'll use placeholder credentials.
+      // Verify this notification is for the app's monitored email account
+      const appEmail = process.env.GMAIL_APP_EMAIL;
+      if (!appEmail) {
+        fastify.log.error('GMAIL_APP_EMAIL not configured');
+        return reply.status(500).send({ message: 'Server configuration error: monitored email not configured.' });
+      }
+
+      if (emailAddress !== appEmail) {
+        fastify.log.warn(`Webhook notification for unexpected email address: ${emailAddress}, expected: ${appEmail}`);
+        return reply.status(400).send({ message: 'Webhook notification for unexpected email address.' });
+      }
+
+      // Use app-owned Gmail credentials
       const oAuth2Client = new google.auth.OAuth2(
         process.env.GMAIL_CLIENT_ID,
         process.env.GMAIL_CLIENT_SECRET
       );
-      // Assuming you have a way to store and retrieve the user's tokens
       oAuth2Client.setCredentials({
-        refresh_token: process.env.GMAIL_REFRESH_TOKEN, // Placeholder
+        refresh_token: process.env.GMAIL_REFRESH_TOKEN,
       });
 
       const gmail = google.gmail({ version: 'v1', auth: oAuth2Client });
 
-      // Fetch the history to find new messages
+      // Fetch the history to find new messages since last historyId
       const historyResponse = await gmail.users.history.list({
-        userId: emailAddress,
+        userId: appEmail,
         startHistoryId: historyId,
         historyTypes: ['messageAdded'],
       });
@@ -189,90 +202,57 @@ async function emailIngestionRoutes(fastify, options) {
         .map(msgAdded => msgAdded.message);
 
       if (messagesAdded && messagesAdded.length > 0) {
+        fastify.log.info(`Processing ${messagesAdded.length} new message(s) from Gmail push notification`);
+        
         for (const msg of messagesAdded) {
-          // Fetch the full message using its ID
-          const fullMessage = await gmail.users.messages.get({
-            userId: emailAddress,
-            id: msg.id,
-            format: 'full', // 'full' to get the entire message content
-          });
-          console.log(`Fetched message: ${fullMessage.data.id}`);
-          // In a real application, you would process this message (e.g., parse content, ingest)
+          try {
+            // Fetch the full message content
+            const emailContent = await fetchEmailContent(appEmail, msg.id);
+            
+            // Verify sender is authorized
+            const senderEmail = emailContent.sender.toLowerCase();
+            const isVerified = await isSenderVerified(senderEmail, pool);
+            
+            if (!isVerified) {
+              fastify.log.warn(`Skipping message ${msg.id} from unauthorized sender: ${senderEmail}`);
+              continue;
+            }
+
+            // Check for Message-ID deduplication
+            if (emailContent.messageId) {
+              const locked = await isMessageIdLocked(pool, emailContent.messageId);
+              if (locked) {
+                fastify.log.warn(`Skipping duplicate message ${msg.id} with Message-ID: ${emailContent.messageId}`);
+                continue;
+              }
+              await addMessageIdToLockTable(pool, emailContent.messageId);
+            }
+
+            fastify.log.info(`Processing message ${msg.id} from verified sender: ${senderEmail}`);
+            
+            // TODO: Process the email content (parse with LLM, create tasks, etc.)
+            // This would integrate with the existing email ingestion logic
+            // For now, just log that we received it
+            fastify.log.info(`Successfully processed message ${msg.id}`);
+            
+          } catch (msgError) {
+            fastify.log.error(`Error processing message ${msg.id}:`, msgError);
+            // Continue processing other messages even if one fails
+          }
         }
       } else {
-        console.log('No new messages added since last history ID.');
+        fastify.log.debug('No new messages added since last history ID');
       }
 
       reply.status(200).send({ message: 'Webhook notification processed successfully.' });
     } catch (error) {
-      console.error('Error processing webhook notification:', error);
+      fastify.log.error('Error processing webhook notification:', error);
       reply.status(500).send({ message: 'Internal server error processing webhook notification.' });
     }
   });
 
-  // Function to fetch emails for a given user
-  async function fetchEmailsForUser(userId, emailAddress) {
-    try {
-      // In a real scenario, you would retrieve the user's Gmail API credentials
-      // (e.g., access token, refresh token) based on `userId` from your database.
-      // For this implementation, we'll use placeholder credentials.
-      const oAuth2Client = new google.auth.OAuth2(
-        process.env.GMAIL_CLIENT_ID,
-        process.env.GMAIL_CLIENT_SECRET
-      );
-      oAuth2Client.setCredentials({
-        refresh_token: process.env.GMAIL_REFRESH_TOKEN, // Placeholder
-      });
-
-      const gmail = google.gmail({ version: 'v1', auth: oAuth2Client });
-
-      // Get the current historyId for the user to use as startHistoryId for the next sync
-      // This part would ideally be stored per user in a database
-      // For this example, we'll fetch the latest history ID
-      const response = await gmail.users.getProfile({ userId: 'me' });
-      const currentHistoryId = response.data.historyId;
-
-      // Fetch messages since the last known historyId (this would come from user's stored data)
-      // For demonstration, let's assume we fetch from a very recent history ID or all unread
-      // A more robust solution would store and retrieve the last synced historyId for each user
-      const listResponse = await gmail.users.messages.list({
-        userId: emailAddress,
-        q: 'is:unread', // Example: fetching unread messages
-      });
-
-      const messages = listResponse.data.messages;
-
-      if (messages && messages.length > 0) {
-        for (const message of messages) {
-          const fullMessage = await gmail.users.messages.get({
-            userId: emailAddress,
-            id: message.id,
-            format: 'full',
-          });
-          console.log(`Synced fetched message for ${emailAddress}: ${fullMessage.data.id}`);
-          // Process the message (parse content, ingest, etc.)
-          // Mark as read after processing if desired:
-          // await gmail.users.messages.modify({
-          //   userId: emailAddress,
-          //   id: message.id,
-          //   resource: {
-          //     removeLabelIds: ['UNREAD'],
-          //   },
-          // });
-        }
-      } else {
-        console.log(`No new unread messages for ${emailAddress} during sync.`);
-      }
-
-      // In a real application, update the user's last synced historyId in your database
-      console.log(`Sync completed for ${emailAddress}. Current historyId: ${currentHistoryId}`);
-
-    } catch (error) {
-      console.error(`Error during email sync for ${emailAddress}:`, error);
-    }
-  }
-
   async function fetchEmailContent(emailAddress, messageId) {
+    // Fetch email content using app-owned Gmail credentials
     try {
       const oAuth2Client = new google.auth.OAuth2(
         process.env.GMAIL_CLIENT_ID,
@@ -284,8 +264,10 @@ async function emailIngestionRoutes(fastify, options) {
 
       const gmail = google.gmail({ version: 'v1', auth: oAuth2Client });
 
+      // Use app's email address for fetching messages
+      const appEmail = process.env.GMAIL_APP_EMAIL || emailAddress;
       const fullMessage = await gmail.users.messages.get({
-        userId: emailAddress,
+        userId: appEmail,
         id: messageId,
         format: 'full',
       });
@@ -597,23 +579,6 @@ async function emailIngestionRoutes(fastify, options) {
       }
     }
   });
-
-  // Schedule the sync fallback to run every 30 minutes
-  // In a real application, you would iterate through all users who have enabled email ingestion
-  // and call fetchEmailsForUser for each of them.
-  // Only start cron job in non-test environments
-  if (process.env.NODE_ENV !== 'test') {
-    cron.schedule('*/30 * * * *', async () => {
-      console.log('Running scheduled email sync fallback...');
-      // Placeholder: In a real app, retrieve all users who have authorized Gmail access
-      // and iterate through them to call fetchEmailsForUser.
-      // For this example, we'll assume a single user with a known email address.
-      const dummyUserId = 'user123'; // Replace with actual user ID
-      const dummyEmailAddress = 'test@gmail.com'; // Replace with actual email address
-      console.log(`Attempting to sync emails for user ${dummyUserId} (${dummyEmailAddress})...`);
-      await fetchEmailsForUser(dummyUserId, dummyEmailAddress);
-    });
-  }
 }
 
 export default fp(emailIngestionRoutes);

@@ -2,7 +2,7 @@
 
 ## Implementation Status Summary
 
-**Last Updated:** 2025-12-31
+**Last Updated:** 2026-01-02
 
 ### Phase Completion Overview
 - ✅ **Phase 1: Foundational Backend & Authentication** - COMPLETE
@@ -33,20 +33,24 @@ The implementation is currently in the final stages of Phase 4 and Phase 5. The 
 ---
 
 ## 1. Introduction
-This document outlines a multi-phase implementation plan for the AI Email Ingestion feature, focusing on automatically converting forwarded emails into actionable tasks while prioritizing accessibility and predictable automation. The plan adheres to Test-Driven Development (TDD) principles, ensuring robustness and maintainability throughout the development lifecycle.
+This document outlines a multi-phase implementation plan for the AI Email Ingestion feature, focusing on automatically converting emails sent to a single, app-owned Gmail inbox into actionable tasks while prioritizing accessibility and predictable automation. The plan adheres to Test-Driven Development (TDD) principles, ensuring robustness and maintainability throughout the development lifecycle.
+
+**Architecture Model:** The system monitors a **single, app-owned Gmail inbox** (configured via `GMAIL_APP_EMAIL`). Users forward emails to this address, and the system verifies the sender against their list of authorized senders before processing. There is **no per-user email inbox watching** functionality.
 
 ## 2. Goals
-*   Automate task creation from forwarded emails.
+*   Automate task creation from emails sent to the app's Gmail inbox.
 *   Reduce cognitive and visual effort for users.
 *   Provide a reliable and predictable system for task extraction and assignment.
 *   Ensure high accessibility for initial task creation workflows.
+*   Verify sender identity to ensure only authorized users can create tasks via email.
 
 ## 3. Principles
-*   **Auto-Create by Default:** All forwarded emails result in task creation; no confirmation required.
+*   **Auto-Create by Default:** All emails from verified senders result in task creation; no confirmation required.
 *   **User-Centric Interpretation:** AI prioritizes the user's implicit and explicit intent.
 *   **Accessibility First:** Workflows minimize reliance on visual scanning or manual editing.
 *   **Predictable Over Perfect:** Consistency and recoverability are prioritized.
 *   **Granularity Over Consolidation:** Distinct requests are split into individual tasks.
+*   **Sender Verification:** Only emails from verified authorized senders are processed for security.
 *   **TDD:** Write tests before writing production code for each functional requirement.
 
 ## 4. Technical Stack
@@ -92,37 +96,45 @@ This document outlines a multi-phase implementation plan for the AI Email Ingest
 
 ### Phase 2: Email Ingestion & Pre-processing
 
-**Objective:** Implement the mechanism for ingesting emails from a single, app-owned address, verifying senders, and performing initial data hygiene and de-duplication.
+**Objective:** Implement the mechanism for ingesting emails from a single, app-owned Gmail inbox, verifying senders, and performing initial data hygiene and de-duplication.
 
 **Requirements:**
-*   Monitoring a single, app-owned Gmail address for incoming emails.
-*   `/api/email-ingestion` endpoint.
-*   User-configured and verified "Registered Sender" email addresses via magic link flow.
+*   Monitoring a single, app-owned Gmail inbox (configured via `GMAIL_APP_EMAIL`).
+*   `/email-ingestion/webhook` endpoint for Gmail push notifications.
+*   `/api/email-ingestion` endpoint for processing email data.
+*   User-configured and verified "Authorized Sender" email addresses via magic link flow.
 *   24-hour `Message-ID` de-duplication.
-*   Raw `Subject` and `Body` storage with truncation and signature stripping.
+*   Raw `Subject` and `Body` storage with truncation.
+
+**Architecture Notes:**
+*   **Single App-Owned Inbox Model:** The system monitors only the app's Gmail inbox, not individual user inboxes.
+*   **Forwarding Model:** Users send/forward emails to the app's email address (`GMAIL_APP_EMAIL`).
+*   **Sender Verification:** The system verifies that the sender's email address is in the user's list of authorized senders before processing.
+*   **No Per-User Inbox Watching:** There is no functionality for watching individual user email accounts.
+*   **No `email_inbox` Table:** The `email_inbox` database table and related cron jobs for user-specific syncing have been removed.
 
 **Tasks:**
 *   **Gmail API Integration (Medium):**
     *   **Gmail Push Notification Setup (Medium):**
     *   [x] Configure a Google Cloud Pub/Sub Topic to receive notifications from the app-owned Gmail account.
     *   [x] Grant the Gmail API permission to publish to this topic.
-    *   [x] Implement a Webhook Endpoint (POST /api/email-webhook) to receive push notifications from Google.
+    *   [x] Implement a Webhook Endpoint (`POST /email-ingestion/webhook`) to receive push notifications from Google for the app's inbox only.
 *   **Email Retrieval Service (Small):**
     *   [x] Upon receiving a webhook notification, fetch only the specific message(s) identified by the notification to minimize API overhead.
     *   [x] Implement a "Sync" fallback that runs every 30 minutes in case a push notification is missed.
-    *   [x] Develop a service to fetch email content (subject, body, message-ID, sender) from Gmail API.
+    *   [x] Develop a service to fetch email content (subject, body, message-ID, sender) from Gmail API using app-owned credentials.
 *   **`/api/email-ingestion` Endpoint (Small):**
     *   [x] Create a new `POST /api/email-ingestion` endpoint to receive email data.
     *   [x] Endpoint should validate incoming email data against schema.
-*   **Registered Sender Verification (Medium):**
-    *   [x] Implement backend logic for a magic link verification flow to confirm "Registered Sender" email addresses.
+*   **Authorized Sender Verification (Medium):**
+    *   [x] Implement backend logic for a magic link verification flow to confirm "Authorized Sender" email addresses.
     *   [x] Develop a temporary token generation and verification system for magic links.
     *   **Temporary Token Characteristics (Medium):**
         *   Structure: Use a cryptographically secure UUID (v4) or a high-entropy random string stored in the database, rather than a JWT, to ensure easy revocation.
-    *   [x] Store verified sender emails in the `user_authorized_senders` table. This table will now store all email addresses a user has registered and verified, not necessarily associated with a user's own email account.
+    *   [x] Store verified sender emails in the `user_authorized_senders` table. This table stores all email addresses a user has registered and verified.
 *   **Email Pre-processing (Small):**
-    *   Crucially, the application will *not* directly access user inboxes. Instead, all emails must be forwarded by the user to a *single, app-owned Gmail address*.
-    *   [x] When an email arrives, the application will check if the sender's email address (the 'From' address) is one of the *verified registered sender email addresses* associated with any user.
+    *   **Forwarding Model:** The application does *not* directly access user inboxes. Instead, users forward emails to the *single, app-owned Gmail address* (`GMAIL_APP_EMAIL`).
+    *   [x] When an email arrives at the app's inbox, the application checks if the sender's email address (the 'From' address) is one of the *verified authorized sender email addresses* associated with any user.
     *   [x] Implement truncation logic for `original_request` to 30000 characters, prioritizing subject then body, with ellipsis.
 *   **De-duplication Logic (Small):**
     *   [x] Implement the 24-hour `Message-ID` lock: check `email_processing_lock` table before processing any email.
@@ -130,7 +142,7 @@ This document outlines a multi-phase implementation plan for the AI Email Ingest
 *   **TDD (Medium):**
     *   [x] Write unit tests for Gmail API parsing and data extraction.
     *   [x] Write integration tests for the `/api/email-ingestion` endpoint, including invalid input handling.
-    *   [x] Write unit tests for email pre-processing (signature stripping, truncation).
+    *   [x] Write unit tests for email pre-processing (truncation).
     *   [x] Write unit and integration tests for `Message-ID` de-duplication logic.
     *   [x] Write end-to-end tests for the magic link verification flow.
 
