@@ -19,6 +19,7 @@ const VALID_INTENTS = ['create_task', 'edit_task'];
 // Maximum field lengths to prevent abuse
 const MAX_TASK_NAME_LENGTH = 250;
 const MAX_ORIGINAL_REQUEST_LENGTH = 2000;
+const MAX_SUBJECT_LENGTH = 500;
 
 /**
  * Schema for LLM task parsing output
@@ -66,6 +67,14 @@ export const LLMTaskOutputSchema = z.object({
     .nullable()
     .optional()
 }).strict(); // Reject any additional fields not in schema
+
+/**
+ * Schema for the LLM's output when parsing an email into a list of tasks.
+ * Expected to be an array of LLMTaskOutputSchema.
+ */
+export const LLMEmailTaskOutputSchema = z.object({
+  tasks: z.array(LLMTaskOutputSchema)
+}).strict();
 
 /**
  * Validates LLM output against the strict schema
@@ -129,7 +138,7 @@ export function validateLLMTaskOutput(llmOutput) {
 export function createSafeFallbackTask(originalRequest, subject = null) {
   // If we have a subject (e.g., from email), use it
   const taskName = subject 
-    ? `Review email: ${subject}`.substring(0, MAX_TASK_NAME_LENGTH)
+    ? `Review email from [Sender]: ${subject}`.substring(0, MAX_TASK_NAME_LENGTH)
     : originalRequest.substring(0, MAX_TASK_NAME_LENGTH);
   
   return {
@@ -139,6 +148,39 @@ export function createSafeFallbackTask(originalRequest, subject = null) {
     original_request: originalRequest.substring(0, MAX_ORIGINAL_REQUEST_LENGTH),
     intent: 'create_task',
     task_id: null
+  };
+}
+
+/**
+ * Creates a safe fallback for email parsing output when LLM output validation fails.
+ * This returns a structure conforming to LLMEmailTaskOutputSchema with a single fallback task.
+ *
+ * @param {string} originalRequest - The original email content or subject.
+ * @param {string | null} sender - The sender's email address, if available.
+ * @param {string | null} subject - The email subject, if available.
+ * @returns {object} Safe fallback email parsing output.
+ */
+export function createSafeFallbackEmailParsingOutput(originalRequest, sender = null, subject = null) {
+  let taskName;
+  if (sender && subject) {
+    taskName = `Review email from ${sender}: ${subject}`.substring(0, MAX_TASK_NAME_LENGTH);
+  } else if (subject) {
+    taskName = `Review email: ${subject}`.substring(0, MAX_TASK_NAME_LENGTH);
+  } else {
+    taskName = `Review email from [Sender]: ${originalRequest.substring(0, MAX_TASK_NAME_LENGTH)}`;
+  }
+
+  return {
+    tasks: [
+      {
+        task_name: taskName,
+        due_date: null,
+        is_completed: false,
+        original_request: originalRequest.substring(0, MAX_ORIGINAL_REQUEST_LENGTH),
+        intent: 'create_task',
+        task_id: null,
+      },
+    ],
   };
 }
 

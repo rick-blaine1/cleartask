@@ -27,6 +27,11 @@
   }
 }
 
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
 @media (prefers-reduced-motion: no-preference) {
   a:nth-of-type(2) .logo {
     animation: logo-spin infinite 20s linear;
@@ -103,4 +108,173 @@
 .task-card-date-input:focus {
   border-color: #007bff; /* Highlight focus with a blue border */
   box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.25); /* Add a subtle glow on focus */
+}
+
+.flex-container {
+  display: flex;
+  align-items: center;
+  gap: 15px; /* Adjust this value for desired spacing */
+}
+
+.email-display {
+  margin-right: auto; /* Pushes the email to the left, and other items to the right */
+}
+
+.email-input-large {
+  width: 100% !important; /* Full width of container */
+  box-sizing: border-box !important; /* Include padding and border in width calculation */
+  font-size: 1.3rem !important; /* Large, accessible font size for low vision users */
+  padding: 16px !important; /* Generous padding for larger touch/click area */
+  border: 3px solid #333 !important; /* Thick, high contrast border */
+  background-color: #fff !important; /* Pure white background for maximum contrast */
+  color: #000 !important; /* Pure black text for maximum contrast */
+  min-height: 50px !important; /* Ensure minimum height for better visibility */
+  font-weight: 500 !important; /* Medium-bold text for better visibility */
+  display: block !important; /* Ensure proper display */
+  margin-bottom: 12px !important; /* Spacing below the input */
+  border-radius: 4px !important; /* Slight rounding for modern look */
+}
+
+.email-input-large:focus {
+  outline: 4px solid #007bff !important; /* Blue outline for focus state */
+  outline-offset: 2px;
+  border-color: #007bff !important; /* Match border to outline color */
+}
+
+.email-input-large:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Authorized Senders Page Styles */
+.authorized-senders-container {
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+.authorized-senders-container h2 {
+  font-size: 2rem;
+  margin-bottom: 20px;
+  color: #fff;
+}
+
+.add-sender-form {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 30px;
+  align-items: stretch;
+}
+
+.sender-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.sender-item {
+  background-color: #1a1a1a;
+  border: 2px solid #fff;
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.verified-status {
+  color: #4ade80;
+  font-weight: 600;
+  padding: 4px 12px;
+  background-color: rgba(74, 222, 128, 0.1);
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.unverified-status {
+  color: #fbbf24;
+  font-weight: 600;
+  padding: 4px 12px;
+  background-color: rgba(251, 191, 36, 0.1);
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.error-message {
+  color: #ef4444;
+  background-color: rgba(239, 68, 68, 0.1);
+  padding: 12px;
+  border-radius: 4px;
+  border: 2px solid #ef4444;
+  margin: 16px 0;
+}
+
+/* Mobile Responsive Styles for Authorized Senders */
+@media (max-width: 768px) {
+  .authorized-senders-container {
+    padding: 16px;
+  }
+
+  .authorized-senders-container h2 {
+    font-size: 1.5rem;
+  }
+
+  /* Stack form elements vertically on mobile */
+  .add-sender-form {
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .add-sender-form button {
+    width: 100%;
+  }
+
+  /* Stack sender item contents vertically on mobile */
+  .sender-item.flex-container {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  /* Make email display full width and wrap */
+  .email-display {
+    width: 100%;
+    word-break: break-all;
+    margin-right: 0;
+    font-size: 1rem;
+    margin-bottom: 8px;
+  }
+
+  /* Stack status and buttons */
+  .sender-item .verified-status,
+  .sender-item .unverified-status {
+    display: block;
+    width: fit-content;
+  }
+
+  /* Make buttons full width on mobile */
+  .sender-item button {
+    width: 100%;
+    min-height: 60px;
+  }
+}
+
+/* Extra small mobile devices */
+@media (max-width: 480px) {
+  .authorized-senders-container {
+    padding: 12px;
+  }
+
+  .authorized-senders-container h2 {
+    font-size: 1.25rem;
+  }
+
+  .sender-item {
+    padding: 12px;
+  }
+
+  .email-display {
+    font-size: 0.9rem;
+  }
 }

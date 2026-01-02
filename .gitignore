@@ -24,6 +24,7 @@ dist-ssr
 .env.production
 .env.local
 .env.test
+
 .env.*.local
 
 # Data folders
@@ -64,6 +65,7 @@ Thumbs.db
 # Agent files
 .roo/
 AGENTS.md
+.rooignore
 
 # Editor directories and files
 .vscode/*

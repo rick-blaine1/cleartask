@@ -1,4 +1,10 @@
-import 'dotenv/config';
+if (process.env.NODE_ENV === 'test') {
+  console.log('Loading .env.test');
+  import('dotenv').then(dotenv => dotenv.config({ path: './.env.test' }));
+} else {
+  import('dotenv').then(dotenv => dotenv.config({ path: './.env' }));
+}
+
 import Fastify from 'fastify';
 import pg from 'pg';
 import fastifyJwt from '@fastify/jwt';
@@ -6,13 +12,16 @@ import fastifyOAuth2 from '@fastify/oauth2';
 import cors from '@fastify/cors';
 import OpenAI from "openai";
 import { processUserInput } from './inputProcessor.js';
-import { buildTaskParsingPrompt, buildTaskSuggestionPrompt, sanitizeUserInput } from './promptTemplates.js';
-import { validateLLMTaskOutput, createSafeFallbackTask, sanitizeForDatabase } from './src/schemas/task.schema.js';
+import { buildTaskParsingPrompt, buildTaskSuggestionPrompt, buildEmailParsingPrompt, buildSentinelPrompt, sanitizeUserInput } from './promptTemplates.js';
+import { validateLLMTaskOutput, createSafeFallbackTask, sanitizeForDatabase, LLMEmailTaskOutputSchema } from './src/schemas/task.schema.js';
 import { llmLogger } from './utils/llmLogger.js';
 import emailIngestionRoutes from './src/email_ingestion/index.js';
 import crypto from 'crypto';
 import nodemailer from 'nodemailer';
 import { emailVerificationSchema } from './src/schemas/email.schema.js';
+import { getVerifiedUserIdsForSender } from './src/email_ingestion/emailVerification.js';
+import { checkDailyEmailLimit, sendTransactionalEmail, DailyLimitReachedError } from './src/email_ingestion/emailService.js';
+
 
 const EMAIL_VERIFICATION_TOKEN_EXPIRATION_HOURS = 24;
 
@@ -116,7 +125,7 @@ function buildApp() {
     }
   });
 
-  fastify.register(emailIngestionRoutes, { pool });
+  fastify.register(emailIngestionRoutes, { pool, openai, requesty, llmLogger });
 
   // Endpoint to request a magic link for email verification
   fastify.post('/api/email-ingestion/request-magic-link', { onRequest: [fastify.authenticate] }, async (request, reply) => {
@@ -170,8 +179,31 @@ function buildApp() {
       //   subject: 'Verify your email address',
       //   html: `<p>Click <a href=\"${magicLink}\">here</a> to verify your email address.</p>`,
       // });
+      
+      try {
+        await sendTransactionalEmail(
+          pool, 
+          email, 
+          'Verify your email address', 
+          `<p>Click <a href=\"${magicLink}\">here</a> to verify your email address.</p>`,
+          'magic_link_verification'
+        );
+        reply.status(200).send({ message: 'Magic link sent to your email address.' });
+      } catch (emailError) {
+        if (emailError instanceof DailyLimitReachedError) {
+          const now = new Date();
+          const startOfNextUtcDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0));
+          fastify.log.warn('Daily email limit reached.', { resetTime: startOfNextUtcDay.toISOString() });
+          return reply.status(503).send({
+            error: 'DailyLimitReached',
+            message: 'Email service temporarily unavailable. Daily limit reached.',
+            resetTime: startOfNextUtcDay.toISOString()
+          });
+        } else {
+          throw emailError; // Re-throw other email errors
+        }
+      }
 
-      reply.status(200).send({ message: 'Magic link sent to your email address.' });
     } catch (error) {
       if (error instanceof z.ZodError) {
         fastify.log.warn('Request magic link validation failed:', error.errors);
@@ -185,44 +217,265 @@ function buildApp() {
     }
   });
 
+  // GET /api/authorized-senders - Fetch all authorized senders for the authenticated user
+  fastify.get('/api/authorized-senders', { onRequest: [fastify.authenticate] }, async (request, reply) => {
+    const client = await pool.connect();
+    try {
+      const userId = request.user.id;
+      
+      // First ensure the user exists in the users table
+      const userCheck = await client.query('SELECT id FROM users WHERE id = $1', [userId]);
+      if (userCheck.rowCount === 0) {
+        // User doesn't exist yet, return empty array
+        return reply.status(200).send([]);
+      }
+      
+      const result = await client.query(
+        'SELECT id, email_address as email, is_verified as "isVerified", created_at FROM user_authorized_senders WHERE user_id = $1 ORDER BY created_at DESC',
+        [userId]
+      );
+      
+      // Return empty array if no senders found (not an error)
+      reply.status(200).send(result.rows);
+    } catch (error) {
+      fastify.log.error('Error fetching authorized senders:', error);
+      reply.status(500).send({ message: 'Failed to fetch authorized senders.', details: error.message });
+    } finally {
+      client.release();
+    }
+  });
+
+  // POST /api/authorized-senders - Add a new authorized sender
+  fastify.post('/api/authorized-senders', { onRequest: [fastify.authenticate] }, async (request, reply) => {
+    const client = await pool.connect();
+    try {
+      const { email } = request.body;
+      
+      if (!email || typeof email !== 'string') {
+        return reply.status(400).send({ message: 'Valid email address is required.' });
+      }
+      
+      const userId = request.user.id;
+      
+      // Check if sender already exists for this user
+      const existingResult = await client.query(
+        'SELECT id, is_verified FROM user_authorized_senders WHERE user_id = $1 AND email_address = $2',
+        [userId, email.toLowerCase()]
+      );
+      
+      if (existingResult.rowCount > 0) {
+        return reply.status(409).send({ message: 'This email address is already in your authorized senders list.' });
+      }
+      
+      // Insert new sender (unverified by default)
+      const insertResult = await client.query(
+        'INSERT INTO user_authorized_senders (user_id, email_address, is_verified) VALUES ($1, $2, FALSE) RETURNING id, email_address as email, is_verified as "isVerified", created_at',
+        [userId, email.toLowerCase()]
+      );
+      
+      // Generate verification token
+      const token = crypto.randomBytes(32).toString('hex');
+      const expiresAt = new Date();
+      expiresAt.setHours(expiresAt.getHours() + EMAIL_VERIFICATION_TOKEN_EXPIRATION_HOURS);
+      
+      await client.query(
+        'INSERT INTO email_verification_tokens (user_id, email, token, expires_at) VALUES ($1, $2, $3, $4)',
+        [userId, email.toLowerCase(), token, expiresAt]
+      );
+      
+      // Send verification email
+      const magicLink = `${process.env.FRONTEND_URL}/verify-email?token=${token}`;
+      fastify.log.info(`Verification link for ${email}: ${magicLink}`);
+      
+      try {
+        await sendTransactionalEmail(
+          pool,
+          email,
+          'Verify your authorized sender email',
+          `<p>Click <a href="${magicLink}">here</a> to verify this email address as an authorized sender.</p>`,
+          'sender_verification'
+        );
+      } catch (emailError) {
+        if (emailError instanceof DailyLimitReachedError) {
+          const now = new Date();
+          const startOfNextUtcDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0));
+          fastify.log.warn('Daily email limit reached.', { resetTime: startOfNextUtcDay.toISOString() });
+          return reply.status(503).send({
+            error: 'DailyLimitReached',
+            message: 'Email service temporarily unavailable. Daily limit reached.',
+            resetTime: startOfNextUtcDay.toISOString()
+          });
+        }
+        // Log but don't fail if email sending fails
+        fastify.log.error('Failed to send verification email:', emailError);
+      }
+      
+      reply.status(201).send(insertResult.rows[0]);
+    } catch (error) {
+      fastify.log.error('Error adding authorized sender:', error);
+      reply.status(500).send({ message: 'Failed to add authorized sender.', details: error.message });
+    } finally {
+      client.release();
+    }
+  });
+
+  // DELETE /api/authorized-senders/:id - Remove an authorized sender
+  fastify.delete('/api/authorized-senders/:id', { onRequest: [fastify.authenticate] }, async (request, reply) => {
+    const client = await pool.connect();
+    try {
+      const { id } = request.params;
+      const userId = request.user.id;
+      
+      const result = await client.query(
+        'DELETE FROM user_authorized_senders WHERE id = $1 AND user_id = $2 RETURNING id',
+        [id, userId]
+      );
+      
+      if (result.rowCount === 0) {
+        return reply.status(404).send({ message: 'Authorized sender not found or you do not have permission to delete it.' });
+      }
+      
+      reply.status(204).send();
+    } catch (error) {
+      fastify.log.error('Error deleting authorized sender:', error);
+      reply.status(500).send({ message: 'Failed to delete authorized sender.', details: error.message });
+    } finally {
+      client.release();
+    }
+  });
+
+  // POST /api/authorized-senders/:id/resend-verification - Resend verification email
+  fastify.post('/api/authorized-senders/:id/resend-verification', { onRequest: [fastify.authenticate] }, async (request, reply) => {
+    const client = await pool.connect();
+    try {
+      const { id } = request.params;
+      const userId = request.user.id;
+      
+      fastify.log.info(`[RESEND-VERIFICATION] Starting resend verification for sender ID: ${id}, user ID: ${userId}`);
+      
+      // Verify sender exists and belongs to user
+      const senderResult = await client.query(
+        'SELECT email_address, is_verified FROM user_authorized_senders WHERE id = $1 AND user_id = $2',
+        [id, userId]
+      );
+      
+      if (senderResult.rowCount === 0) {
+        fastify.log.warn(`[RESEND-VERIFICATION] Sender not found: ID ${id}, user ${userId}`);
+        return reply.status(404).send({ message: 'Authorized sender not found or you do not have permission to access it.' });
+      }
+      
+      const { email_address, is_verified } = senderResult.rows[0];
+      fastify.log.info(`[RESEND-VERIFICATION] Found sender: ${email_address}, verified: ${is_verified}`);
+      
+      if (is_verified) {
+        fastify.log.warn(`[RESEND-VERIFICATION] Email already verified: ${email_address}`);
+        return reply.status(400).send({ message: 'This email address is already verified.' });
+      }
+      
+      // Generate new verification token
+      const token = crypto.randomBytes(32).toString('hex');
+      const expiresAt = new Date();
+      expiresAt.setHours(expiresAt.getHours() + EMAIL_VERIFICATION_TOKEN_EXPIRATION_HOURS);
+      
+      fastify.log.info(`[RESEND-VERIFICATION] Generated token for ${email_address}, expires at ${expiresAt.toISOString()}`);
+      
+      await client.query(
+        'INSERT INTO email_verification_tokens (user_id, email, token, expires_at) VALUES ($1, $2, $3, $4)',
+        [userId, email_address, token, expiresAt]
+      );
+      
+      fastify.log.info(`[RESEND-VERIFICATION] Token saved to database for ${email_address}`);
+      
+      // Send verification email
+      const magicLink = `${process.env.FRONTEND_URL}/verify-email?token=${token}`;
+      fastify.log.info(`[RESEND-VERIFICATION] Magic link: ${magicLink}`);
+      fastify.log.info(`[RESEND-VERIFICATION] RESEND_API_KEY configured: ${!!process.env.RESEND_API_KEY}`);
+      fastify.log.info(`[RESEND-VERIFICATION] RESEND_DOMAIN: ${process.env.RESEND_DOMAIN || 'NOT SET (will use default)'}`);
+      
+      try {
+        fastify.log.info(`[RESEND-VERIFICATION] Calling sendTransactionalEmail for ${email_address}`);
+        await sendTransactionalEmail(
+          pool,
+          email_address,
+          'Verify your authorized sender email',
+          `<p>Click <a href="${magicLink}">here</a> to verify this email address as an authorized sender.</p>`,
+          'sender_verification_resend'
+        );
+        fastify.log.info(`[RESEND-VERIFICATION] Email sent successfully to ${email_address}`);
+        reply.status(200).send({ message: 'Verification email sent successfully.' });
+      } catch (emailError) {
+        fastify.log.error(`[RESEND-VERIFICATION] Email sending error: ${emailError.message}`, { error: emailError });
+        if (emailError instanceof DailyLimitReachedError) {
+          const now = new Date();
+          const startOfNextUtcDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0));
+          fastify.log.warn('Daily email limit reached.', { resetTime: startOfNextUtcDay.toISOString() });
+          return reply.status(503).send({
+            error: 'DailyLimitReached',
+            message: 'Email service temporarily unavailable. Daily limit reached.',
+            resetTime: startOfNextUtcDay.toISOString()
+          });
+        }
+        throw emailError;
+      }
+    } catch (error) {
+      fastify.log.error(`[RESEND-VERIFICATION] Outer catch error: ${error.message}`, { error: error, stack: error.stack });
+      reply.status(500).send({ message: 'Failed to resend verification email.', details: error.message });
+    } finally {
+      client.release();
+    }
+  });
+
   // Endpoint to verify the magic link
   fastify.get('/api/email-ingestion/verify-magic-link', async (request, reply) => {
     const client = await pool.connect();
     try {
       const { token } = request.query;
+      fastify.log.info(`[VERIFY-MAGIC-LINK] Starting verification for token: ${token ? token.substring(0, 8) + '...' : 'MISSING'}`);
+      
       if (!token) {
+        fastify.log.warn('[VERIFY-MAGIC-LINK] No token provided');
         return reply.status(400).send({ message: 'Token is required.' });
       }
 
+      fastify.log.info('[VERIFY-MAGIC-LINK] Querying database for token');
       const result = await client.query(
         'SELECT * FROM email_verification_tokens WHERE token = $1 AND used_at IS NULL AND expires_at > NOW()',
         [token]
       );
 
       if (result.rowCount === 0) {
+        fastify.log.warn(`[VERIFY-MAGIC-LINK] Token not found, expired, or already used: ${token.substring(0, 8)}...`);
         return reply.status(400).send({ message: 'Invalid, expired, or already used magic link.' });
       }
 
       const { user_id, email } = result.rows[0];
+      fastify.log.info(`[VERIFY-MAGIC-LINK] Token valid for user: ${user_id}, email: ${email}`);
 
       // Mark the token as used
+      fastify.log.info('[VERIFY-MAGIC-LINK] Marking token as used');
       await client.query(
         'UPDATE email_verification_tokens SET used_at = NOW() WHERE token = $1',
         [token]
       );
+      fastify.log.info('[VERIFY-MAGIC-LINK] Token marked as used successfully');
 
       // Add or update the user_authorized_senders table
-      await client.query(
-        'INSERT INTO user_authorized_senders (user_id, email_address, is_verified) VALUES ($1, $2, TRUE) ON CONFLICT (email_address) DO UPDATE SET user_id = EXCLUDED.user_id, is_verified = TRUE, created_at = NOW()',
+      fastify.log.info('[VERIFY-MAGIC-LINK] Updating user_authorized_senders table');
+      const senderResult = await client.query(
+        'INSERT INTO user_authorized_senders (user_id, email_address, is_verified) VALUES ($1, $2, TRUE) ON CONFLICT (email_address) DO UPDATE SET user_id = EXCLUDED.user_id, is_verified = TRUE, created_at = NOW() RETURNING id, user_id, email_address, is_verified',
         [user_id, email]
       );
+      fastify.log.info(`[VERIFY-MAGIC-LINK] Sender record updated: ${JSON.stringify(senderResult.rows[0])}`);
 
+      fastify.log.info('[VERIFY-MAGIC-LINK] Verification completed successfully, sending 200 response');
       reply.status(200).send({ message: 'Email verified successfully.' });
+      fastify.log.info('[VERIFY-MAGIC-LINK] Response sent');
     } catch (error) {
-      fastify.log.error('Error verifying magic link:', error);
+      fastify.log.error(`[VERIFY-MAGIC-LINK] Error during verification: ${error.message}`, { error, stack: error.stack });
       reply.status(500).send({ message: 'Failed to verify magic link.', details: error.message });
     } finally {
       client.release();
+      fastify.log.info('[VERIFY-MAGIC-LINK] Database client released');
     }
   });
 
@@ -981,7 +1234,7 @@ if (process.env.NODE_ENV !== 'test') {
         app.log.info('Creating users table...');
         await client.query(`
           CREATE TABLE IF NOT EXISTS users (
-            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            id VARCHAR(255) PRIMARY KEY,
             email VARCHAR(255) NOT NULL,
             name VARCHAR(255),
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -1046,7 +1299,7 @@ if (process.env.NODE_ENV !== 'test') {
         await client.query(`
           CREATE TABLE IF NOT EXISTS email_inbox (
               id SERIAL PRIMARY KEY,
-              user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+              user_id VARCHAR(255) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
               email_address VARCHAR(255) UNIQUE NOT NULL,
               access_token TEXT NOT NULL,
               refresh_token TEXT NOT NULL,
@@ -1066,7 +1319,7 @@ if (process.env.NODE_ENV !== 'test') {
         await client.query(`
           CREATE TABLE IF NOT EXISTS user_authorized_senders (
             id SERIAL PRIMARY KEY,
-            user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            user_id VARCHAR(255) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
             email_address VARCHAR(255) UNIQUE NOT NULL,
             is_verified BOOLEAN DEFAULT FALSE,
             created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
@@ -1084,7 +1337,7 @@ if (process.env.NODE_ENV !== 'test') {
         await client.query(`
           CREATE TABLE IF NOT EXISTS email_verification_tokens (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            user_id VARCHAR(255) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
             email VARCHAR(255) NOT NULL,
             token VARCHAR(255) UNIQUE NOT NULL,
             expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
@@ -1112,6 +1365,23 @@ if (process.env.NODE_ENV !== 'test') {
         app.log.info('Creating email_processing_lock index...');
         await client.query(`CREATE INDEX IF NOT EXISTS idx_email_processing_lock_message_id ON email_processing_lock (message_id);`);
         app.log.info('Email processing lock index created successfully');
+
+        // Create system_email_ledger table
+        app.log.info('Creating system_email_ledger table...');
+        await client.query(`
+          CREATE TABLE IF NOT EXISTS system_email_ledger (
+            id SERIAL PRIMARY KEY,
+            sent_at TIMESTAMP WITH TIME ZONE NOT NULL,
+            purpose VARCHAR(100) NOT NULL,
+            recipient_email VARCHAR(255) NOT NULL,
+            status VARCHAR(50) NOT NULL
+          );
+        `);
+        app.log.info('System email ledger table created successfully');
+
+        app.log.info('Creating system_email_ledger index on sent_at...');
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_system_email_ledger_sent_at ON system_email_ledger (sent_at);`);
+        app.log.info('System email ledger index created successfully');
 
         app.log.info('Database schema initialized successfully');
       } finally {

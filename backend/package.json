@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node app.js",
     "dev": "nodemon app.js",
-    "test": "cross-env NODE_ENV=test node --test",
+    "test": "cross-env NODE_ENV=test POSTGRES_HOST=db POSTGRES_PORT=5432 POSTGRES_USER=user POSTGRES_PASSWORD=password POSTGRES_DB=cleartaskdb node --test",
     "test:auth": "cross-env NODE_ENV=test node --test tests/auth.test.js",
     "test:email-verification": "cross-env NODE_ENV=test node --test tests/email_verification.test.js"
   },

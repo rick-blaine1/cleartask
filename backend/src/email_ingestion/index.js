@@ -102,8 +102,27 @@ export function truncateOriginalRequest(subject, body) {
   return result;
 }
 
+import { buildEmailParsingPrompt, LLM_CONFIGS } from '../../promptTemplates.js';
+import OpenAI from "openai";
+
+
+function createSafeFallbackEmailParsingOutput(emailContent) {
+  // Simple fallback: create a single task with the entire email content
+  // as the task name, and mark it as high priority to ensure visibility.
+  return {
+    tasks: [{
+      task_name: `Review email: ${emailContent.substring(0, 100)}${emailContent.length > 100 ? '...' : ''}`,
+      due_date: null,
+      priority: 'high',
+      source: 'email',
+      attachments: null
+    }],
+    has_actionable_items: true
+  };
+}
+
 async function emailIngestionRoutes(fastify, options) {
-  const { pool } = options;
+  const { pool, openai, requesty, llmLogger } = options;
   fastify.get('/email-ingestion/test-auth', { onRequest: [fastify.authenticate] }, async (request, reply) => {
     reply.send({ message: 'Authentication successful for email ingestion endpoint', user: request.user });
   });
@@ -391,7 +410,183 @@ async function emailIngestionRoutes(fastify, options) {
         }
         await addMessageIdToLockTable(pool, validatedEmail.messageId);
       }
-      reply.status(200).send({ message: 'Email ingestion endpoint hit and validated successfully.', data: validatedEmail });
+      
+      // *** LLM Parsing Logic ***
+      let parsedEmailTasks;
+      let llmUsed = 'None';
+      const requestId = `email-ingestion-req_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+      const currentDate = new Date().toISOString().split('T')[0];
+      const emailContentForLLM = validatedEmail.body || validatedEmail.htmlBody || '';
+      const emailSubjectForLLM = validatedEmail.subject || '';
+
+      llmLogger.info({
+        requestId,
+        event: 'email_llm_request_start',
+        sender: senderEmail,
+        messageId: validatedEmail.messageId,
+        subject: emailSubjectForLLM,
+        contentLength: emailContentForLLM.length
+      }, 'LLM email parsing request initiated');
+
+      const emailParsingPrompt = buildEmailParsingPrompt({
+        emailContent: emailContentForLLM,
+        emailSubject: emailSubjectForLLM,
+        currentDate: currentDate
+      });
+
+      const callLLM = async (llmClient, modelName, timeoutMs) => {
+        const timeoutPromise = new Promise((resolve, reject) => {
+          setTimeout(() => {
+            reject(new Error(`${modelName} API call for email parsing timed out after ${timeoutMs / 1000} seconds`));
+          }, timeoutMs);
+        });
+
+        const llmCallPromise = llmClient.chat.completions.create({
+          model: modelName,
+          messages: [{
+            role: "user",
+            content: emailParsingPrompt
+          }],
+          response_format: { type: "json_object" },
+        });
+
+        const response = await Promise.race([llmCallPromise, timeoutPromise]);
+        return JSON.parse(response.choices[0].message.content);
+      };
+
+      // Try Requesty first
+      if (requesty) {
+        try {
+          llmLogger.debug({
+            requestId,
+            event: 'llm_call_start',
+            provider: LLM_CONFIGS.REQUESTY.name,
+            model: LLM_CONFIGS.REQUESTY.model,
+            timeout: LLM_CONFIGS.REQUESTY.timeout
+          }, 'Attempting LLM call to Requesty for email parsing');
+          
+          parsedEmailTasks = await callLLM(requesty, LLM_CONFIGS.REQUESTY.model, LLM_CONFIGS.REQUESTY.timeout);
+          llmUsed = LLM_CONFIGS.REQUESTY.name;
+
+          llmLogger.info({
+            requestId,
+            event: 'llm_call_success',
+            provider: LLM_CONFIGS.REQUESTY.name,
+            outputSize: JSON.stringify(parsedEmailTasks).length
+          }, 'Email parsed successfully using Requesty');
+
+        } catch (requestyError) {
+          llmLogger.warn({
+            requestId,
+            event: 'llm_call_failed',
+            provider: LLM_CONFIGS.REQUESTY.name,
+            error: requestyError.message,
+            willFallback: !!openai
+          }, 'Requesty failed or timed out for email parsing, falling back to OpenAI');
+
+          // Fallback to OpenAI if Requesty fails
+          if (openai) {
+            try {
+              llmLogger.debug({
+                requestId,
+                event: 'llm_call_start',
+                provider: LLM_CONFIGS.OPENAI_GPT4O_MINI.name,
+                model: LLM_CONFIGS.OPENAI_GPT4O_MINI.model,
+                timeout: LLM_CONFIGS.OPENAI_GPT4O_MINI.timeout,
+                isFallback: true
+              }, 'Attempting fallback LLM call to OpenAI for email parsing');
+
+              parsedEmailTasks = await callLLM(openai, LLM_CONFIGS.OPENAI_GPT4O_MINI.model, LLM_CONFIGS.OPENAI_GPT4O_MINI.timeout);
+              llmUsed = LLM_CONFIGS.OPENAI_GPT4O_MINI.name;
+
+              llmLogger.info({
+                requestId,
+                event: 'llm_call_success',
+                provider: LLM_CONFIGS.OPENAI_GPT4O_MINI.name,
+                outputSize: JSON.stringify(parsedEmailTasks).length,
+                isFallback: true
+              }, 'Email parsed successfully using OpenAI fallback');
+            } catch (openaiError) {
+              llmLogger.error({
+                requestId,
+                event: 'llm_call_failed',
+                provider: LLM_CONFIGS.OPENAI_GPT4O_MINI.name,
+                error: openaiError.message,
+                isFallback: true
+              }, 'OpenAI fallback also failed for email parsing');
+            }
+          }
+        }
+      } else if (openai) {
+        // If Requesty is not configured, try OpenAI directly
+        try {
+          llmLogger.debug({
+            requestId,
+            event: 'llm_call_start',
+            provider: LLM_CONFIGS.OPENAI_GPT4O_MINI.name,
+            model: LLM_CONFIGS.OPENAI_GPT4O_MINI.model,
+            timeout: LLM_CONFIGS.OPENAI_GPT4O_MINI.timeout
+          }, 'Attempting LLM call to OpenAI for email parsing');
+
+          parsedEmailTasks = await callLLM(openai, LLM_CONFIGS.OPENAI_GPT4O_MINI.model, LLM_CONFIGS.OPENAI_GPT4O_MINI.timeout);
+          llmUsed = LLM_CONFIGS.OPENAI_GPT4O_MINI.name;
+
+          llmLogger.info({
+            requestId,
+            event: 'llm_call_success',
+            provider: LLM_CONFIGS.OPENAI_GPT4O_MINI.name,
+            outputSize: JSON.stringify(parsedEmailTasks).length
+          }, 'Email parsed successfully using OpenAI');
+        } catch (openaiError) {
+          llmLogger.error({
+            requestId,
+            event: 'llm_call_failed',
+            provider: LLM_CONFIGS.OPENAI_GPT4O_MINI.name,
+            error: openaiError.message
+          }, 'OpenAI API call failed for email parsing');
+        }
+      }
+
+      if (!parsedEmailTasks) {
+        llmLogger.warn({
+          requestId,
+          event: 'fallback_activated',
+          reason: 'no_llm_output_email_parsing'
+        }, 'No LLM output for email parsing, using safe fallback');
+        parsedEmailTasks = createSafeFallbackEmailParsingOutput(emailContentForLLM);
+        llmUsed = 'Fallback (No LLM)';
+      }
+
+      // Validate LLM output against schema
+      const validationResult = emailIngestionSchema.safeParse(parsedEmailTasks);
+
+      if (!validationResult.success) {
+        llmLogger.warn({
+          requestId,
+          event: 'validation_failed',
+          error: validationResult.error?.message,
+          issues: validationResult.error?.issues,
+          securitySignal: 'EMAIL_LLM_VALIDATION_FAILURE'
+        }, 'LLM email parsing output failed schema validation, using safe fallback');
+        parsedEmailTasks = createSafeFallbackEmailParsingOutput(emailContentForLLM);
+        llmUsed = 'Fallback (Validation Failed)';
+      } else {
+        parsedEmailTasks = validationResult.data;
+        llmLogger.info({
+          requestId,
+          event: 'validation_success',
+          llmUsed,
+          taskCount: parsedEmailTasks.tasks?.length || 0
+        }, 'LLM email parsing output validated successfully');
+      }
+
+      // Here you would process the parsedEmailTasks (e.g., save them to the database)
+      // For now, we'll just return the parsed tasks
+      reply.status(200).send({
+        message: 'Email ingestion and parsing complete.',
+        parsedTasks: parsedEmailTasks,
+        llmUsed: llmUsed
+      });
     } catch (error) {
       if (error instanceof z.ZodError) {
         fastify.log.warn('Email ingestion validation failed:', error.errors);

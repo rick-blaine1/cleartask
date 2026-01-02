@@ -1,8 +1,12 @@
 import React, { useEffect, useState, useRef } from 'react';
 import TaskCard from './components/TaskCard';
+import AuthorizedSenders from './components/AuthorizedSenders';
+import MagicLinkSuccess from './components/MagicLinkSuccess';
+import VerifyEmail from './components/VerifyEmail';
 import type { Task } from './db';
 import { db } from './db';
 import { speak, speakTaskCreated, speakAmbiguousInput } from './tts';
+import { Routes, Route, Link, useLocation } from 'react-router-dom';
 import './App.css';
 
 declare global {
@@ -19,6 +23,8 @@ function App() {
   const [isListening, setIsListening] = useState<boolean>(false);
   const [transcript, setTranscript] = useState<string>('');
   const recognitionRef = useRef<any>(null);
+  const location = useLocation();
+  const isAuthorizedSendersPage = location.pathname === '/authorized-senders';
 
   const audioContextRef = useRef<AudioContext | null>(null);
 
@@ -398,10 +404,15 @@ function App() {
             <button onClick={handleGoogleLogout}>
               Logout
             </button>
-            <button onClick={isListening ? stopListening : startListening} disabled={!('webkitSpeechRecognition' in window)}>
-              {isListening ? 'Stop Listening' : 'Start Voice Input'}
-            </button>
+            {!isAuthorizedSendersPage && (
+              <button onClick={isListening ? stopListening : startListening} disabled={!('webkitSpeechRecognition' in window)}>
+                {isListening ? 'Stop Listening' : 'Start Voice Input'}
+              </button>
+            )}
             {transcript && <p>Transcript: {transcript}</p>}
+            <Link to={isAuthorizedSendersPage ? "/" : "/authorized-senders"}>
+              <button>{isAuthorizedSendersPage ? "Back to Task List" : "Manage Authorized Senders"}</button>
+            </Link>
           </>
         ) : (
           <>
@@ -414,26 +425,33 @@ function App() {
           </>
         )}
       </div>
-        <div className={`task-list ${isUILocked ? 'locked-ui-overlay' : ''}`}>
-          {tasks.map(task => (
-            <TaskCard
-              key={task.id}
-              task={task}
-              onToggleComplete={handleToggleComplete}
-              onInitiateDeleteConfirmation={handleInitiateDeleteConfirmation}
-              onCancelDelete={handleCancelDeleteConfirmation}
-              isUILocked={isUILocked}
-              isPendingDeletion={pendingDeletionTask?.id === task.id}
-              onDelete={handleDeleteTask} // Pass the actual delete handler
-              onSave={handleSaveTaskDescription}
-            />
-          ))}
-          {!tasks.length && isLoggedIn && (
-            <div className="no-tasks-message">
-              No tasks to display
-            </div>
-          )}
-        </div>
+      <Routes>
+        <Route path="/" element={
+          <div className={`task-list ${isUILocked ? 'locked-ui-overlay' : ''}`}>
+            {tasks.map(task => (
+              <TaskCard
+                key={task.id}
+                task={task}
+                onToggleComplete={handleToggleComplete}
+                onInitiateDeleteConfirmation={handleInitiateDeleteConfirmation}
+                onCancelDelete={handleCancelDeleteConfirmation}
+                isUILocked={isUILocked}
+                isPendingDeletion={pendingDeletionTask?.id === task.id}
+                onDelete={handleDeleteTask} // Pass the actual delete handler
+                onSave={handleSaveTaskDescription}
+              />
+            ))}
+            {!tasks.length && isLoggedIn && (
+              <div className="no-tasks-message">
+                No tasks to display
+              </div>
+            )}
+          </div>
+        } />
+        <Route path="/authorized-senders" element={<AuthorizedSenders />} />
+        <Route path="/verify-email" element={<VerifyEmail />} />
+        <Route path="/magic-link-success" element={<MagicLinkSuccess />} />
+      </Routes>
     </>
   );
 }
