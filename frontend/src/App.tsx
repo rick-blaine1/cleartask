@@ -322,10 +322,14 @@ function App() {
       recognitionRef.current.onstart = () => {
         setIsListening(true);
         setTranscript(''); // Clear previous transcript on new start
+        playAudioFeedback(800, 100); // Higher tone for start
+        triggerHapticFeedback(50);
       };
 
       recognitionRef.current.onend = () => {
         setIsListening(false);
+        playAudioFeedback(400, 150); // Lower tone for end
+        triggerHapticFeedback(100);
       };
 
       recognitionRef.current.onerror = (event: any) => {
