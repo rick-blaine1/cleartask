@@ -78,6 +78,11 @@ AGENTS.md
 *.sln
 *.sw?
 
+# Project specific ignores
+screenshots/
+backend/backend/
+frontend/te
+
 # Sensitive files
 *.key
 *.pem

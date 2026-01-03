@@ -146,6 +146,56 @@
   cursor: not-allowed;
 }
 
+.main-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 20px;
+  justify-content: center;
+  align-items: center;
+}
+
+.nav-button {
+  border-radius: 8px;
+  border: 2px solid var(--text-primary);
+  padding: var(--standard-padding);
+  font-size: 1rem;
+  font-weight: 500;
+  font-family: inherit;
+  background-color: var(--bg-color);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all 0.25s;
+  min-width: var(--min-tap-target);
+  height: var(--min-tap-target); /* Explicitly set height for consistency */
+  box-sizing: border-box; /* Include padding and border in the height */
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  margin: 0 5px; /* Adds some space between buttons */
+  text-decoration: none; /* Keep for NavLink */
+}
+
+.nav-button:hover {
+  background-color: var(--text-primary);
+  color: var(--bg-color);
+}
+
+.nav-button:focus,
+.nav-button:focus-visible {
+  outline: 4px solid var(--color-priority);
+  outline-offset: 2px;
+}
+
+.nav-button.active {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.nav-button.active:hover {
+  background-color: var(--text-primary);
+  color: var(--bg-color);
+}
+
 /* Authorized Senders Page Styles */
 .authorized-senders-container {
   width: 100%;
@@ -208,6 +258,19 @@
   border-radius: 4px;
   border: 2px solid #ef4444;
   margin: 16px 0;
+}
+
+.auth-error-message {
+  color: #ef4444;
+  background-color: rgba(239, 68, 68, 0.15);
+  padding: 16px 20px;
+  border-radius: 8px;
+  border: 3px solid #ef4444;
+  margin: 20px 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+  text-align: center;
+  line-height: 1.5;
 }
 
 /* Mobile Responsive Styles for Authorized Senders */
@@ -276,5 +339,153 @@
 
   .email-display {
     font-size: 0.9rem;
+  }
+}
+
+/* Delete Confirmation Modal Styles */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.85);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+  backdrop-filter: blur(4px);
+}
+
+.modal-content {
+  background-color: #1a1a1a;
+  border: 3px solid #FFD700;
+  border-radius: 12px;
+  padding: 32px;
+  max-width: 500px;
+  width: 90%;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  text-align: center;
+}
+
+.modal-content h2 {
+  color: #fff;
+  font-size: 1.8rem;
+  margin-bottom: 16px;
+  font-weight: bold;
+}
+
+.modal-content p {
+  color: #ddd;
+  font-size: 1.1rem;
+  margin-bottom: 12px;
+  line-height: 1.5;
+}
+
+.task-name-preview {
+  color: #FFD700;
+  font-size: 1.3rem;
+  padding: 12px;
+  background-color: rgba(255, 215, 0, 0.1);
+  border-radius: 6px;
+  margin: 16px 0;
+  word-break: break-word;
+}
+
+.timeout-warning {
+  color: #fbbf24;
+  font-size: 1.2rem;
+  font-weight: 600;
+  margin: 20px 0;
+  padding: 12px;
+  background-color: rgba(251, 191, 36, 0.1);
+  border-radius: 6px;
+  border: 2px solid #fbbf24;
+}
+
+.modal-buttons {
+  display: flex;
+  gap: 16px;
+  justify-content: center;
+  margin-top: 24px;
+}
+
+.modal-buttons button {
+  min-width: 140px;
+  min-height: 60px;
+  font-size: 1.1rem;
+  font-weight: 600;
+  border-radius: 8px;
+  border: 2px solid;
+  cursor: pointer;
+  transition: all 0.25s;
+  font-family: inherit;
+}
+
+.confirm-button {
+  background-color: #ef4444;
+  color: #fff;
+  border-color: #ef4444;
+}
+
+.confirm-button:hover {
+  background-color: #dc2626;
+  border-color: #dc2626;
+  transform: scale(1.05);
+}
+
+.confirm-button:focus {
+  outline: 4px solid #fca5a5;
+  outline-offset: 2px;
+}
+
+.cancel-button {
+  background-color: #6b7280;
+  color: #fff;
+  border-color: #6b7280;
+}
+
+.cancel-button:hover {
+  background-color: #4b5563;
+  border-color: #4b5563;
+  transform: scale(1.05);
+}
+
+.cancel-button:focus {
+  outline: 4px solid #9ca3af;
+  outline-offset: 2px;
+}
+
+/* Mobile responsive styles for modal */
+@media (max-width: 768px) {
+  .modal-content {
+    padding: 24px;
+    width: 95%;
+  }
+
+  .modal-content h2 {
+    font-size: 1.5rem;
+  }
+
+  .modal-content p {
+    font-size: 1rem;
+  }
+
+  .task-name-preview {
+    font-size: 1.1rem;
+  }
+
+  .timeout-warning {
+    font-size: 1rem;
+  }
+
+  .modal-buttons {
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .modal-buttons button {
+    width: 100%;
+    min-width: unset;
   }
 }

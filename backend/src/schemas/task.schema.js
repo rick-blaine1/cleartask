@@ -14,7 +14,7 @@ import { z } from 'zod';
  */
 
 // Valid intent values - strictly enumerated
-const VALID_INTENTS = ['create_task', 'edit_task'];
+const VALID_INTENTS = ['create_task', 'edit_task', 'delete_task'];
 
 // Maximum field lengths to prevent abuse
 const MAX_TASK_NAME_LENGTH = 250;
@@ -96,14 +96,14 @@ export function validateLLMTaskOutput(llmOutput) {
     
     // Additional business logic validation
     // If intent is edit_task, task_id must be present
-    if (result.data.intent === 'edit_task' && !result.data.task_id) {
+    if ((result.data.intent === 'edit_task' || result.data.intent === 'delete_task') && !result.data.task_id) {
       return {
         success: false,
-        error: new Error('edit_task intent requires a valid task_id'),
+        error: new Error(`${result.data.intent} intent requires a valid task_id`),
         issues: [{
           code: 'custom',
           path: ['task_id'],
-          message: 'task_id is required when intent is edit_task'
+          message: `task_id is required when intent is ${result.data.intent}`
         }]
       };
     }

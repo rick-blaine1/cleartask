@@ -50,6 +50,13 @@ export function speakTaskCreated(): void {
 }
 
 /**
+ * Speaks feedback for successful task updates
+ */
+export function speakTaskUpdated(): void {
+  speak('Task updated!');
+}
+
+/**
  * Speaks feedback when voice input is ambiguous
  */
 export function speakAmbiguousInput(): void {

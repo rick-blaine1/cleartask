@@ -1,13 +1,17 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import TaskCard from './components/TaskCard';
 import AuthorizedSenders from './components/AuthorizedSenders';
 import MagicLinkSuccess from './components/MagicLinkSuccess';
+import HelpPage from './components/HelpPage';
 import VerifyEmail from './components/VerifyEmail';
 import type { Task } from './db';
 import { db } from './db';
-import { speak, speakTaskCreated, speakAmbiguousInput } from './tts';
-import { Routes, Route, Link, useLocation } from 'react-router-dom';
+import { speak, speakTaskCreated, speakAmbiguousInput, speakTaskUpdated } from './tts';
+import { Routes, Route, NavLink, useLocation } from 'react-router-dom';
 import './App.css';
+
+// Development-only logging utility
+import { devLog, devError } from './utils/devLog';
 
 declare global {
   interface Window {
@@ -17,14 +21,23 @@ declare global {
 
 function App() {
   const [tasks, setTasks] = useState<Task[]>([]);
+  const tasksRef = useRef<Task[]>([]); // Ref to hold latest tasks for closure access
   const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false);
-  const [pendingDeletionTask, setPendingDeletionTask] = useState<Task | null>(null); // New state for pending deletion task
-  const [isUILocked, setIsUILocked] = useState<boolean>(false); // New state for UI lock
+  const [pendingDeletionTask, setPendingDeletionTask] = useState<Task | null>(null); // State for task awaiting deletion confirmation
+  const [showDeleteConfirmation, setShowDeleteConfirmation] = useState<boolean>(false); // State to control visibility of confirmation UI
+  const [deleteConfirmationTimer, setDeleteConfirmationTimer] = useState<number>(10); // State for the countdown timer (starts at 10)
+  const [confirmationId, setConfirmationId] = useState<string | null>(null); // State to store the confirmation ID from backend
+  const deleteTimeoutRef = useRef<number | null>(null); // Ref to hold the timeout ID
+  const countdownIntervalRef = useRef<number | null>(null); // Ref to hold the countdown interval ID
+  const [isUILocked, setIsUILocked] = useState<boolean>(false); // State for UI lock
   const [isListening, setIsListening] = useState<boolean>(false);
+  const [isAwaitingDeleteConfirmation, setIsAwaitingDeleteConfirmation] = useState<boolean>(false); // New state to track if awaiting delete confirmation
   const [transcript, setTranscript] = useState<string>('');
+  const [authError, setAuthError] = useState<string | null>(null);
   const recognitionRef = useRef<any>(null);
   const location = useLocation();
   const isAuthorizedSendersPage = location.pathname === '/authorized-senders';
+  const isHelpPage = location.pathname === '/help';
 
   const audioContextRef = useRef<AudioContext | null>(null);
 
@@ -82,6 +95,223 @@ function App() {
     };
   }, []);
 
+  // Cleanup function for delete confirmation state
+  const cleanupDeleteConfirmation = useCallback(() => {
+    if (deleteTimeoutRef.current) {
+      clearTimeout(deleteTimeoutRef.current);
+      deleteTimeoutRef.current = null;
+    }
+    if (countdownIntervalRef.current) {
+      clearInterval(countdownIntervalRef.current);
+      countdownIntervalRef.current = null;
+    }
+    setPendingDeletionTask(null);
+    setShowDeleteConfirmation(false);
+    setConfirmationId(null);
+    setDeleteConfirmationTimer(10);
+    setIsUILocked(false);
+    setIsAwaitingDeleteConfirmation(false);
+  }, []);
+
+  const startListening = useCallback(() => {
+    if (recognitionRef.current) {
+      recognitionRef.current.start();
+    }
+  }, []);
+
+  const stopListening = useCallback(() => {
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+    }
+  }, []);
+
+  // Function to confirm deletion
+  const handleConfirmDeletion = useCallback(async () => {
+    if (!confirmationId) {
+      devError('No confirmation ID available');
+      cleanupDeleteConfirmation();
+      return;
+    }
+
+    const token = localStorage.getItem('jwt');
+    if (!token) {
+      cleanupDeleteConfirmation();
+      return;
+    }
+
+    try {
+      const response = await fetch(
+        `${import.meta.env.VITE_APP_API_BASE_URL}/api/tasks/confirm-delete/${confirmationId}`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ confirmed: true }),
+        }
+      );
+
+      if (response.status === 204) {
+        // Task deleted successfully
+        if (pendingDeletionTask?.id) {
+          setTasks(prevTasks => sortTasks(prevTasks.filter(task => task.id !== pendingDeletionTask.id)));
+          speak('Task deleted successfully.');
+        }
+        cleanupDeleteConfirmation();
+      } else if (response.status === 404) {
+        // Confirmation expired or not found
+        speak('Confirmation expired. Please try again.');
+        cleanupDeleteConfirmation();
+      } else {
+        const errorData = await response.json();
+        devError('Failed to confirm deletion, status:', response.status, 'error:', errorData);
+        speak('Failed to delete task. Please try again.');
+        cleanupDeleteConfirmation();
+      }
+    } catch (error) {
+      devError('Error confirming deletion:', error);
+      speak('Error deleting task. Please try again.');
+      cleanupDeleteConfirmation();
+    }
+  }, [confirmationId, pendingDeletionTask, sortTasks, cleanupDeleteConfirmation]);
+
+  // Function to cancel deletion
+  const handleCancelDeletion = useCallback(async () => {
+    if (!confirmationId) {
+      cleanupDeleteConfirmation();
+      return;
+    }
+
+    const token = localStorage.getItem('jwt');
+    if (!token) {
+      cleanupDeleteConfirmation();
+      return;
+    }
+
+    try {
+      const response = await fetch(
+        `${import.meta.env.VITE_APP_API_BASE_URL}/api/tasks/confirm-delete/${confirmationId}`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ confirmed: false }),
+        }
+      );
+
+      if (response.ok) {
+        speak('Deletion cancelled.');
+      }
+    } catch (error) {
+      devError('Error cancelling deletion:', error);
+    } finally {
+      cleanupDeleteConfirmation();
+    }
+  }, [confirmationId, cleanupDeleteConfirmation]);
+
+  const sendVoiceTranscriptToBackend = useCallback(async (transcript: string) => {
+    const token = localStorage.getItem('jwt');
+    if (!token) {
+      return;
+    }
+    try {
+      const apiUrl = `${import.meta.env.VITE_APP_API_BASE_URL}/api/tasks/create-from-voice`;
+      const clientDate = new Date(); // Get current date/time on client
+      const clientTimezoneOffset = clientDate.getTimezoneOffset(); // Get timezone offset in minutes
+
+
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ transcribedText: transcript, clientDate: clientDate.toISOString(), clientTimezoneOffset }),
+      });
+
+      if (response.status === 202) {
+        // Backend is requesting confirmation for deletion
+        const confirmationData = await response.json();
+        
+        if (confirmationData.requiresConfirmation && confirmationData.confirmationId && confirmationData.taskId) {
+          // Find the task to delete using tasksRef to get current state
+          const taskToDelete = tasksRef.current.find(task => task.id === confirmationData.taskId);
+          
+          if (taskToDelete) {
+            // Set up confirmation state
+            setPendingDeletionTask(taskToDelete);
+            setConfirmationId(confirmationData.confirmationId);
+            setShowDeleteConfirmation(true);
+            setIsUILocked(true);
+            setDeleteConfirmationTimer(10);
+            setIsAwaitingDeleteConfirmation(true); // Set state to await confirmation
+            
+            // Speak confirmation prompt - delay starting listening to avoid capturing TTS
+            speak(`Are you sure you want to delete task: ${taskToDelete.task_name}?`);
+            
+            // Delay starting listening to allow TTS to finish
+            setTimeout(() => {
+              startListening();
+            }, 2000); // 2 second delay to allow TTS to complete
+            
+            // Start countdown timer
+            let timeLeft = 10;
+            countdownIntervalRef.current = window.setInterval(() => {
+              timeLeft -= 1;
+              setDeleteConfirmationTimer(timeLeft);
+              
+              if (timeLeft <= 0) {
+                if (countdownIntervalRef.current) {
+                  clearInterval(countdownIntervalRef.current);
+                  countdownIntervalRef.current = null;
+                }
+              }
+            }, 1000);
+            
+            // Set timeout to auto-cancel after 10 seconds
+            deleteTimeoutRef.current = window.setTimeout(() => {
+              speak('Confirmation timeout. Deletion cancelled.');
+              cleanupDeleteConfirmation();
+            }, 10000);
+          } else {
+            devError('Task not found for confirmation:', confirmationData.taskId);
+            speakAmbiguousInput();
+          }
+        }
+        
+        setTranscript(''); // Clear the transcript input
+      } else if (response.ok) {
+        const taskData = await response.json();
+
+        // Handle both create (201) and update (200) responses
+        if (response.status === 201) {
+          // New task created - add to list
+          setTasks(prevTasks => sortTasks([...prevTasks, taskData]));
+          speakTaskCreated();
+        } else if (response.status === 200) {
+          // Existing task updated - replace in list
+          setTasks(prevTasks => sortTasks(prevTasks.map(task =>
+            task.id === taskData.id ? taskData : task
+          )));
+          speakTaskUpdated();
+        }
+
+        setTranscript(''); // Clear the transcript input
+      } else {
+        const errorData = await response.json();
+        devError('Failed to send voice transcript to backend, status:', response.status, 'error:', errorData);
+        speakAmbiguousInput();
+      }
+    } catch (error) {
+      devError('Error communicating with the backend to create task:', error);
+      alert('Error communicating with the backend to create task.');
+    }
+  }, [sortTasks, startListening, cleanupDeleteConfirmation]);
+
+  // Effect for setting up basic speech recognition event handlers (not onresult)
   useEffect(() => {
     if ('webkitSpeechRecognition' in window) {
       recognitionRef.current = new window.webkitSpeechRecognition();
@@ -92,19 +322,14 @@ function App() {
       recognitionRef.current.onstart = () => {
         setIsListening(true);
         setTranscript(''); // Clear previous transcript on new start
-      };
-
-      recognitionRef.current.onresult = (event: any) => {
-        const speechResult = event.results[0][0].transcript;
-        setTranscript(speechResult);
-
-        // Automatically send the speech result to the backend
-        sendVoiceTranscriptToBackend(speechResult);
+        playAudioFeedback(800, 100); // Higher tone for start
+        triggerHapticFeedback(50);
       };
 
       recognitionRef.current.onend = () => {
         setIsListening(false);
-
+        playAudioFeedback(400, 150); // Lower tone for end
+        triggerHapticFeedback(100);
       };
 
       recognitionRef.current.onerror = (event: any) => {
@@ -116,35 +341,66 @@ function App() {
     }
   }, []);
 
-  const startListening = () => {
-    if (recognitionRef.current) {
-      recognitionRef.current.start();
-    }
-  };
+  // Effect to handle speech recognition results, dependent on latest state
+  useEffect(() => {
+    if (!recognitionRef.current) return;
 
-  const stopListening = () => {
-    if (recognitionRef.current) {
-      recognitionRef.current.stop();
-    }
-  };
+    recognitionRef.current.onresult = (event: any) => {
+      const speechResult = event.results[0][0].transcript;
+      setTranscript(speechResult);
+
+      // Stop listening immediately to prevent feedback loops and capture of TTS
+      stopListening();
+
+      if (isAwaitingDeleteConfirmation) {
+        // Using .includes() for more robust matching against potential extra words caught by speech recognition
+        if (speechResult.toLowerCase().includes('yes')) {
+          handleConfirmDeletion();
+        } else if (speechResult.toLowerCase().includes('no')) {
+          handleCancelDeletion();
+        } else {
+          speak('Please say yes or no to confirm.');
+          // Re-enable listening briefly after speaking to allow TTS to finish
+          setTimeout(() => {
+            startListening();
+          }, 1500);
+        }
+      } else {
+        // Automatically send the speech result to the backend
+        sendVoiceTranscriptToBackend(speechResult);
+      }
+    };
+  }, [isAwaitingDeleteConfirmation, confirmationId, handleConfirmDeletion, handleCancelDeletion, sendVoiceTranscriptToBackend, startListening, stopListening]);
 
   useEffect(() => {
     const hash = window.location.hash;
     const params = new URLSearchParams(hash.substring(1));
     const token = params.get('token');
+    const error = params.get('error');
 
-    if (token) {
+    if (error === 'access_denied') {
+      setAuthError('Access Denied: Your email is not on the invited users list. Please contact the administrator for access.');
+      window.location.hash = ''; // Clean the URL
+      setIsLoggedIn(false);
+    } else if (token) {
       localStorage.setItem('jwt', token);
       setIsLoggedIn(true);
+      setAuthError(null);
       window.location.hash = ''; // Clean the URL
       fetchTasks(token);
     } else if (localStorage.getItem('jwt')) {
       setIsLoggedIn(true);
+      setAuthError(null);
       fetchTasks(localStorage.getItem('jwt'));
     } else {
       setIsLoggedIn(false);
     }
   }, []);
+
+  // Keep tasksRef in sync with tasks state
+  useEffect(() => {
+    tasksRef.current = tasks;
+  }, [tasks]);
 
   const fetchTasks = async (token: string | null) => {
     if (!token) return;
@@ -158,9 +414,11 @@ function App() {
         const data = await response.json();
         setTasks(sortTasks(data));
       } else {
+        devError('Failed to fetch tasks, status:', response.status);
         setTasks([]);
       }
     } catch (error) {
+      devError('Error fetching tasks:', error);
       setTasks([]);
     }
   };
@@ -175,9 +433,7 @@ function App() {
   };
 
   const handleCancelDeleteConfirmation = () => {
-    setPendingDeletionTask(null);
-    setIsUILocked(false);
-
+    cleanupDeleteConfirmation();
   };
 
   const handleDeleteTask = async (taskId: string) => {
@@ -199,11 +455,11 @@ function App() {
         setPendingDeletionTask(null);
         setIsUILocked(false);
       } else {
-
+        devError('Failed to delete task, status:', response.status);
         alert('Failed to delete task. Please try again.');
       }
     } catch (error) {
-
+      devError('Error deleting task:', error);
       alert('Error deleting task. Please try again.');
     }
   };
@@ -237,12 +493,14 @@ function App() {
         setTasks(prevTasks =>
           sortTasks(prevTasks.map(t => (t.id === updatedTask.id ? updatedTask : t)))
         );
-        speakTaskCreated(); // Reuse for completion/incompletion feedback
+        speakTaskUpdated(); // Reuse for completion/incompletion feedback
       } else {
         const errorData = await response.json();
+        devError('Failed to toggle task completion, status:', response.status, 'error:', errorData);
         speakAmbiguousInput();
       }
     } catch (error) {
+      devError('Error toggling task completion:', error);
       speakAmbiguousInput();
     }
   };
@@ -269,7 +527,7 @@ function App() {
       oscillator.start(audioContextRef.current.currentTime);
       oscillator.stop(audioContextRef.current.currentTime + duration / 1000);
     } else {
-      // AudioContext not available
+      devLog('AudioContext not available.');
     }
   };
 
@@ -306,6 +564,7 @@ function App() {
     localStorage.removeItem('jwt');
     setIsLoggedIn(false);
     setTasks([]);
+    window.location.href = '/'; // Redirect to root URL
   };
 
   const handleSaveTaskDescription = async (taskId: string, newTitle: string, newDescription: string, newDate: string) => {
@@ -342,77 +601,54 @@ function App() {
         );
       } else {
         const errorData = await response.json();
-
+        devError('Failed to save task, status:', response.status, 'error:', errorData);
         alert('Failed to save task. Please try again.');
       }
     } catch (error) {
-
+      devError('Error saving task:', error);
       alert('Failed to save task. Please try again.');
-    }
-  };
-
-  const sendVoiceTranscriptToBackend = async (transcript: string) => {
-    const token = localStorage.getItem('jwt');
-    if (!token) {
-      return;
-    }
-    try {
-      const apiUrl = `${import.meta.env.VITE_APP_API_BASE_URL}/api/tasks/create-from-voice`;
-      const clientDate = new Date(); // Get current date/time on client
-      const clientTimezoneOffset = clientDate.getTimezoneOffset(); // Get timezone offset in minutes
-
-
-      const response = await fetch(apiUrl, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ transcribedText: transcript, clientDate: clientDate.toISOString(), clientTimezoneOffset }),
-      });
-
-      if (response.ok) {
-        const taskData = await response.json();
-
-        // Handle both create (201) and update (200) responses
-        if (response.status === 201) {
-          // New task created - add to list
-          setTasks(prevTasks => sortTasks([...prevTasks, taskData]));
-        } else if (response.status === 200) {
-          // Existing task updated - replace in list
-          setTasks(prevTasks => sortTasks(prevTasks.map(task =>
-            task.id === taskData.id ? taskData : task
-          )));
-        }
-
-        setTranscript(''); // Clear the transcript input
-        speakTaskCreated();
-      } else {
-        const errorData = await response.json();
-        speakAmbiguousInput();
-      }
-    } catch (error) {
-      alert('Error communicating with the backend to create task.');
     }
   };
 
   return (
     <>
       <div className="card">
+        {authError && (
+          <div className="auth-error-message">
+            {authError}
+          </div>
+        )}
         {isLoggedIn ? (
           <>
-            <button onClick={handleGoogleLogout}>
-              Logout
-            </button>
-            {!isAuthorizedSendersPage && (
-              <button onClick={isListening ? stopListening : startListening} disabled={!('webkitSpeechRecognition' in window)}>
-                {isListening ? 'Stop Listening' : 'Start Voice Input'}
-              </button>
-            )}
-            {transcript && <p>Transcript: {transcript}</p>}
-            <Link to={isAuthorizedSendersPage ? "/" : "/authorized-senders"}>
-              <button>{isAuthorizedSendersPage ? "Back to Task List" : "Manage Authorized Senders"}</button>
-            </Link>
+            <nav className="main-nav">
+              {!isHelpPage ? (
+                <>
+                  <NavLink to="/" onClick={handleGoogleLogout} className="nav-button">
+                    Logout
+                  </NavLink>
+                  {!isAuthorizedSendersPage && (
+                    <button onClick={isListening ? stopListening : startListening} disabled={!('webkitSpeechRecognition' in window)} className="nav-button">
+                      {isListening ? 'Stop Listening' : 'Start Voice Input'}
+                    </button>
+                  )}
+                  <NavLink to={isAuthorizedSendersPage ? "/" : "/authorized-senders"} className="nav-button">
+                    {isAuthorizedSendersPage ? "Back to Task List" : "Manage Authorized Senders"}
+                  </NavLink>
+                  <NavLink to="/help" className="nav-button">
+                    Help
+                  </NavLink>
+                </>
+              ) : (
+                <>
+                  <NavLink to="/" onClick={handleGoogleLogout} className="nav-button">
+                    Logout
+                  </NavLink>
+                  <NavLink to="/" className="nav-button">
+                    Back to Task List
+                  </NavLink>
+                </>
+              )}
+            </nav>
           </>
         ) : (
           <>
@@ -425,6 +661,27 @@ function App() {
           </>
         )}
       </div>
+      
+      {/* Delete Confirmation Modal */}
+      {showDeleteConfirmation && pendingDeletionTask && (
+        <div className="modal-overlay">
+          <div className="modal-content">
+            <h2>Confirm Deletion</h2>
+            <p>Are you sure you want to delete this task?</p>
+            <p className="task-name-preview"><strong>{pendingDeletionTask.task_name}</strong></p>
+            <p className="timeout-warning">Time remaining: {deleteConfirmationTimer} seconds</p>
+            <div className="modal-buttons">
+              <button onClick={handleConfirmDeletion} className="confirm-button">
+                Yes, Delete
+              </button>
+              <button onClick={handleCancelDeletion} className="cancel-button">
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      
       <Routes>
         <Route path="/" element={
           <div className={`task-list ${isUILocked ? 'locked-ui-overlay' : ''}`}>
@@ -451,6 +708,7 @@ function App() {
         <Route path="/authorized-senders" element={<AuthorizedSenders />} />
         <Route path="/verify-email" element={<VerifyEmail />} />
         <Route path="/magic-link-success" element={<MagicLinkSuccess />} />
+        <Route path="/help" element={<HelpPage />} />
       </Routes>
     </>
   );
