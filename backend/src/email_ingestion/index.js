@@ -2,8 +2,10 @@ import fp from 'fastify-plugin';
 import { z } from 'zod';
 import { emailIngestionSchema } from '../schemas/email.schema.js';
 import { google } from 'googleapis';
-import { isSenderVerified } from './emailVerification.js';
+import { isSenderVerified, getVerifiedUserIdsForSender } from './emailVerification.js';
 import { isMessageIdLocked, addMessageIdToLockTable } from './messageIdService.js';
+import { getStoredHistoryId, updateStoredHistoryId } from './gmailWatchService.js';
+import { createSafeFallbackEmailParsingOutput } from '../schemas/task.schema.js';
 
 export async function fetchEmailContent(emailAddress, messageId) {
   // Fetch email content using app-owned Gmail credentials
@@ -106,22 +108,6 @@ export function truncateOriginalRequest(subject, body) {
 import { buildEmailParsingPrompt, LLM_CONFIGS } from '../../promptTemplates.js';
 import OpenAI from "openai";
 
-
-function createSafeFallbackEmailParsingOutput(emailContent) {
-  // Simple fallback: create a single task with the entire email content
-  // as the task name, and mark it as high priority to ensure visibility.
-  return {
-    tasks: [{
-      task_name: `Review email: ${emailContent.substring(0, 100)}${emailContent.length > 100 ? '...' : ''}`,
-      due_date: null,
-      priority: 'high',
-      source: 'email',
-      attachments: null
-    }],
-    has_actionable_items: true
-  };
-}
-
 async function emailIngestionRoutes(fastify, options) {
   const { pool, openai, requesty, llmLogger } = options;
   fastify.get('/email-ingestion/test-auth', { onRequest: [fastify.authenticate] }, async (request, reply) => {
@@ -160,10 +146,15 @@ async function emailIngestionRoutes(fastify, options) {
       }
 
       const decodedData = Buffer.from(message.data, 'base64').toString('utf8');
-      const { emailAddress, historyId } = JSON.parse(decodedData);
+      fastify.log.debug(`Decoded Pub/Sub message data: ${decodedData}`);
+      
+      const parsedData = JSON.parse(decodedData);
+      // Google's Gmail API uses email_address and history_id (with underscores)
+      const emailAddress = parsedData.emailAddress || parsedData.email_address;
+      const historyId = parsedData.historyId || parsedData.history_id;
 
       if (!emailAddress || !historyId) {
-        fastify.log.warn('Invalid decoded message data: missing emailAddress or historyId');
+        fastify.log.warn(`Invalid decoded message data: missing emailAddress or historyId. Received: ${JSON.stringify(parsedData)}`);
         return reply.status(400).send({ message: 'Invalid decoded message data: missing emailAddress or historyId.' });
       }
 
@@ -190,10 +181,26 @@ async function emailIngestionRoutes(fastify, options) {
 
       const gmail = google.gmail({ version: 'v1', auth: oAuth2Client });
 
+      // Retrieve stored historyId from database as fallback
+      let startHistoryId = historyId;
+      try {
+        const storedHistoryId = await getStoredHistoryId(pool, appEmail, fastify.log);
+        if (storedHistoryId) {
+          startHistoryId = storedHistoryId;
+          fastify.log.info(`Using stored historyId: ${storedHistoryId}`);
+        } else if (!historyId) {
+          fastify.log.warn('No historyId in notification and no stored historyId found');
+          return reply.status(200).send({ message: 'No historyId available, skipping processing.' });
+        }
+      } catch (dbError) {
+        fastify.log.error('Error retrieving stored historyId:', dbError);
+        // Continue with historyId from notification if database retrieval fails
+      }
+
       // Fetch the history to find new messages since last historyId
       const historyResponse = await gmail.users.history.list({
         userId: appEmail,
-        startHistoryId: historyId,
+        startHistoryId: startHistoryId,
         historyTypes: ['messageAdded'],
       });
 
@@ -210,7 +217,14 @@ async function emailIngestionRoutes(fastify, options) {
             const emailContent = await fetchEmailContent(appEmail, msg.id);
             
             // Verify sender is authorized
-            const senderEmail = emailContent.sender.toLowerCase();
+            let rawSender = emailContent.sender || '';
+            let senderEmail = rawSender.toLowerCase();
+            // Extract email from format "Name <email@domain.com>"
+            const match = senderEmail.match(/<(.*?)>/);
+            if (match && match[1]) {
+              senderEmail = match[1];
+            }
+            
             const isVerified = await isSenderVerified(senderEmail, pool);
             
             if (!isVerified) {
@@ -230,18 +244,257 @@ async function emailIngestionRoutes(fastify, options) {
 
             fastify.log.info(`Processing message ${msg.id} from verified sender: ${senderEmail}`);
             
-            // TODO: Process the email content (parse with LLM, create tasks, etc.)
-            // This would integrate with the existing email ingestion logic
-            // For now, just log that we received it
-            fastify.log.info(`Successfully processed message ${msg.id}`);
+            // Process the email content with LLM and create tasks
+            try {
+              // Get all user IDs for this verified sender
+              const userIds = await getVerifiedUserIdsForSender(senderEmail, pool);
+              
+              if (userIds.length === 0) {
+                fastify.log.warn(`No user IDs found for verified sender: ${senderEmail}`);
+                continue;
+              }
+              
+              // Parse email with LLM
+              let parsedEmailTasks;
+              let llmUsed = 'None';
+              const requestId = `webhook-email-req_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+              const currentDate = new Date().toISOString().split('T')[0];
+              const emailContentForLLM = emailContent.body || '';
+              const emailSubjectForLLM = emailContent.subject || '';
+              
+              llmLogger.info({
+                requestId,
+                event: 'webhook_email_llm_request_start',
+                sender: senderEmail,
+                messageId: emailContent.messageId,
+                subject: emailSubjectForLLM,
+                contentLength: emailContentForLLM.length,
+                userCount: userIds.length
+              }, 'LLM email parsing request initiated from webhook');
+              
+              const emailParsingPrompt = buildEmailParsingPrompt({
+                emailContent: emailContentForLLM,
+                emailSubject: emailSubjectForLLM,
+                currentDate: currentDate
+              });
+              
+              const callLLM = async (llmClient, modelName, timeoutMs) => {
+                const timeoutPromise = new Promise((resolve, reject) => {
+                  setTimeout(() => {
+                    reject(new Error(`${modelName} API call for email parsing timed out after ${timeoutMs / 1000} seconds`));
+                  }, timeoutMs);
+                });
+                
+                const llmCallPromise = llmClient.chat.completions.create({
+                  model: modelName,
+                  messages: [{
+                    role: "user",
+                    content: emailParsingPrompt
+                  }],
+                  response_format: { type: "json_object" },
+                });
+                
+                const response = await Promise.race([llmCallPromise, timeoutPromise]);
+                return JSON.parse(response.choices[0].message.content);
+              };
+              
+              // Try Requesty first
+              if (requesty) {
+                try {
+                  llmLogger.debug({
+                    requestId,
+                    event: 'llm_call_start',
+                    provider: LLM_CONFIGS.REQUESTY.name,
+                    model: LLM_CONFIGS.REQUESTY.model,
+                    timeout: LLM_CONFIGS.REQUESTY.timeout
+                  }, 'Attempting LLM call to Requesty for webhook email parsing');
+                  
+                  parsedEmailTasks = await callLLM(requesty, LLM_CONFIGS.REQUESTY.model, LLM_CONFIGS.REQUESTY.timeout);
+                  llmUsed = LLM_CONFIGS.REQUESTY.name;
+                  
+                  llmLogger.info({
+                    requestId,
+                    event: 'llm_call_success',
+                    provider: LLM_CONFIGS.REQUESTY.name,
+                    outputSize: JSON.stringify(parsedEmailTasks).length
+                  }, 'Webhook email parsed successfully using Requesty');
+                  
+                } catch (requestyError) {
+                  llmLogger.warn({
+                    requestId,
+                    event: 'llm_call_failed',
+                    provider: LLM_CONFIGS.REQUESTY.name,
+                    error: requestyError.message,
+                    willFallback: !!openai
+                  }, 'Requesty failed for webhook email parsing, falling back to OpenAI');
+                  
+                  // Fallback to OpenAI if Requesty fails
+                  if (openai) {
+                    try {
+                      llmLogger.debug({
+                        requestId,
+                        event: 'llm_call_start',
+                        provider: LLM_CONFIGS.OPENAI_GPT4O_MINI.name,
+                        model: LLM_CONFIGS.OPENAI_GPT4O_MINI.model,
+                        timeout: LLM_CONFIGS.OPENAI_GPT4O_MINI.timeout,
+                        isFallback: true
+                      }, 'Attempting fallback LLM call to OpenAI for webhook email parsing');
+                      
+                      parsedEmailTasks = await callLLM(openai, LLM_CONFIGS.OPENAI_GPT4O_MINI.model, LLM_CONFIGS.OPENAI_GPT4O_MINI.timeout);
+                      llmUsed = LLM_CONFIGS.OPENAI_GPT4O_MINI.name;
+                      
+                      llmLogger.info({
+                        requestId,
+                        event: 'llm_call_success',
+                        provider: LLM_CONFIGS.OPENAI_GPT4O_MINI.name,
+                        outputSize: JSON.stringify(parsedEmailTasks).length,
+                        isFallback: true
+                      }, 'Webhook email parsed successfully using OpenAI fallback');
+                    } catch (openaiError) {
+                      llmLogger.error({
+                        requestId,
+                        event: 'llm_call_failed',
+                        provider: LLM_CONFIGS.OPENAI_GPT4O_MINI.name,
+                        error: openaiError.message,
+                        isFallback: true
+                      }, 'OpenAI fallback also failed for webhook email parsing');
+                    }
+                  }
+                }
+              } else if (openai) {
+                // If Requesty is not configured, try OpenAI directly
+                try {
+                  llmLogger.debug({
+                    requestId,
+                    event: 'llm_call_start',
+                    provider: LLM_CONFIGS.OPENAI_GPT4O_MINI.name,
+                    model: LLM_CONFIGS.OPENAI_GPT4O_MINI.model,
+                    timeout: LLM_CONFIGS.OPENAI_GPT4O_MINI.timeout
+                  }, 'Attempting LLM call to OpenAI for webhook email parsing');
+                  
+                  parsedEmailTasks = await callLLM(openai, LLM_CONFIGS.OPENAI_GPT4O_MINI.model, LLM_CONFIGS.OPENAI_GPT4O_MINI.timeout);
+                  llmUsed = LLM_CONFIGS.OPENAI_GPT4O_MINI.name;
+                  
+                  llmLogger.info({
+                    requestId,
+                    event: 'llm_call_success',
+                    provider: LLM_CONFIGS.OPENAI_GPT4O_MINI.name,
+                    outputSize: JSON.stringify(parsedEmailTasks).length
+                  }, 'Webhook email parsed successfully using OpenAI');
+                } catch (openaiError) {
+                  llmLogger.error({
+                    requestId,
+                    event: 'llm_call_failed',
+                    provider: LLM_CONFIGS.OPENAI_GPT4O_MINI.name,
+                    error: openaiError.message
+                  }, 'OpenAI API call failed for webhook email parsing');
+                }
+              }
+              
+              if (!parsedEmailTasks) {
+                llmLogger.warn({
+                  requestId,
+                  event: 'fallback_activated',
+                  reason: 'no_llm_output_webhook_email_parsing'
+                }, 'No LLM output for webhook email parsing, using safe fallback');
+                parsedEmailTasks = createSafeFallbackEmailParsingOutput(
+                  emailContentForLLM,
+                  senderEmail,
+                  emailSubjectForLLM
+                );
+                llmUsed = 'Fallback (No LLM)';
+              }
+              
+              // Validate LLM output
+              if (!parsedEmailTasks.tasks || !Array.isArray(parsedEmailTasks.tasks)) {
+                llmLogger.warn({
+                  requestId,
+                  event: 'validation_failed',
+                  reason: 'invalid_tasks_structure',
+                  securitySignal: 'WEBHOOK_EMAIL_LLM_VALIDATION_FAILURE'
+                }, 'LLM webhook email parsing output has invalid structure, using safe fallback');
+                parsedEmailTasks = createSafeFallbackEmailParsingOutput(
+                  emailContentForLLM,
+                  senderEmail,
+                  emailSubjectForLLM
+                );
+                llmUsed = 'Fallback (Validation Failed)';
+              }
+              
+              // Create tasks in database for each user
+              let tasksCreated = 0;
+              for (const userId of userIds) {
+                for (const task of parsedEmailTasks.tasks) {
+                  try {
+                    const dbClient = await pool.connect();
+                    try {
+                      await dbClient.query(
+                        'INSERT INTO tasks (id, user_id, task_name, due_date, is_completed, original_request) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5)',
+                        [
+                          userId,
+                          task.task_name || `Review email: ${emailSubjectForLLM}`,
+                          task.due_date || null,
+                          task.is_completed || false,
+                          emailContent.original_request || emailContentForLLM.substring(0, 2000)
+                        ]
+                      );
+                      tasksCreated++;
+                      fastify.log.info(`Created task for user ${userId} from email: ${task.task_name}`);
+                    } finally {
+                      dbClient.release();
+                    }
+                  } catch (dbError) {
+                    fastify.log.error(`Error creating task for user ${userId}:`, dbError);
+                    // Continue with other tasks even if one fails
+                  }
+                }
+              }
+              
+              llmLogger.info({
+                requestId,
+                event: 'webhook_email_processing_complete',
+                llmUsed,
+                taskCount: parsedEmailTasks.tasks.length,
+                tasksCreated,
+                userCount: userIds.length
+              }, `Successfully processed webhook email and created ${tasksCreated} task(s)`);
+              
+              fastify.log.info(`Successfully processed message ${msg.id}: created ${tasksCreated} task(s) for ${userIds.length} user(s)`);
+              
+            } catch (processingError) {
+              fastify.log.error(`Error processing email content for message ${msg.id}:`, processingError);
+              // Continue with other messages even if this one fails
+            }
             
           } catch (msgError) {
             fastify.log.error(`Error processing message ${msg.id}:`, msgError);
             // Continue processing other messages even if one fails
           }
         }
+        
+        // Update stored historyId after successfully processing messages
+        try {
+          const latestHistoryId = historyResponse.data.historyId;
+          if (latestHistoryId) {
+            await updateStoredHistoryId(pool, appEmail, latestHistoryId, null, fastify.log);
+            fastify.log.info(`Updated stored historyId to: ${latestHistoryId}`);
+          }
+        } catch (updateError) {
+          fastify.log.error('Error updating stored historyId:', updateError);
+          // Don't fail the request if historyId update fails
+        }
       } else {
         fastify.log.debug('No new messages added since last history ID');
+        
+        // Still update historyId even if no new messages
+        try {
+          const latestHistoryId = historyResponse.data.historyId;
+          if (latestHistoryId) {
+            await updateStoredHistoryId(pool, appEmail, latestHistoryId, null, fastify.log);
+          }
+        } catch (updateError) {
+          fastify.log.error('Error updating stored historyId:', updateError);
+        }
       }
 
       reply.status(200).send({ message: 'Webhook notification processed successfully.' });
@@ -373,7 +626,14 @@ async function emailIngestionRoutes(fastify, options) {
       const validatedEmail = emailIngestionSchema.parse(request.body);
       fastify.log.info('Received valid email for ingestion:', validatedEmail);
 
-      const senderEmail = validatedEmail.sender.toLowerCase();
+      let rawSender = validatedEmail.sender || '';
+      let senderEmail = rawSender.toLowerCase();
+      // Extract email from format "Name <email@domain.com>"
+      const match = senderEmail.match(/<(.*?)>/);
+      if (match && match[1]) {
+        senderEmail = match[1];
+      }
+      
       const isVerified = await isSenderVerified(senderEmail, pool);
 
       if (!isVerified) {

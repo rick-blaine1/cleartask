@@ -21,6 +21,7 @@ import nodemailer from 'nodemailer';
 import { emailVerificationSchema } from './src/schemas/email.schema.js';
 import { getVerifiedUserIdsForSender } from './src/email_ingestion/emailVerification.js';
 import { checkDailyEmailLimit, sendTransactionalEmail, DailyLimitReachedError } from './src/email_ingestion/emailService.js';
+import cron from 'node-cron';
 
 
 const EMAIL_VERIFICATION_TOKEN_EXPIRATION_HOURS = 24;
@@ -1363,6 +1364,23 @@ if (process.env.NODE_ENV !== 'test') {
         await client.query(`CREATE INDEX IF NOT EXISTS idx_system_email_ledger_sent_at ON system_email_ledger (sent_at);`);
         app.log.info('System email ledger index created successfully');
 
+        // Create gmail_sync_state table
+        app.log.info('Creating gmail_sync_state table...');
+        await client.query(`
+          CREATE TABLE IF NOT EXISTS gmail_sync_state (
+            id SERIAL PRIMARY KEY,
+            email_address VARCHAR(255) UNIQUE NOT NULL,
+            history_id VARCHAR(255) NOT NULL,
+            watch_expiration TIMESTAMP WITH TIME ZONE,
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+          );
+        `);
+        app.log.info('Gmail sync state table created successfully');
+
+        app.log.info('Creating gmail_sync_state index...');
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_gmail_sync_state_email ON gmail_sync_state (email_address);`);
+        app.log.info('Gmail sync state index created successfully');
+
         app.log.info('Database schema initialized successfully');
       } finally {
         client.release();
@@ -1373,6 +1391,34 @@ if (process.env.NODE_ENV !== 'test') {
         app.log.error(`Stack trace: ${error.stack}`);
       }
       process.exit(1);
+    }
+    
+    // Initialize Gmail watch for push notifications
+    if (process.env.GMAIL_APP_EMAIL && process.env.GCP_PUBSUB_TOPIC_NAME) {
+      try {
+        const { initializeGmailWatch } = await import('./src/email_ingestion/gmailWatchService.js');
+        const historyId = await initializeGmailWatch(app.pool, app.log);
+        app.log.info(`Gmail watch initialized successfully with historyId: ${historyId}`);
+      } catch (error) {
+        app.log.error('Failed to initialize Gmail watch:', error);
+        app.log.warn('Gmail push notifications will not work. Falling back to polling only.');
+      }
+    } else {
+      app.log.warn('Gmail watch not initialized: GMAIL_APP_EMAIL or GCP_PUBSUB_TOPIC_NAME not configured');
+    }
+
+    // Schedule Gmail watch renewal every 6 days (before 7-day expiration)
+    if (process.env.GMAIL_APP_EMAIL && process.env.GCP_PUBSUB_TOPIC_NAME) {
+      cron.schedule('0 0 */6 * *', async () => {
+        try {
+          const { renewGmailWatch } = await import('./src/email_ingestion/gmailWatchService.js');
+          await renewGmailWatch(app.pool, app.log);
+          app.log.info('Gmail watch renewed successfully');
+        } catch (error) {
+          app.log.error('Failed to renew Gmail watch:', error);
+        }
+      });
+      app.log.info('Gmail watch renewal scheduler initialized (runs every 6 days)');
     }
     
     try {
