@@ -1,17 +1,17 @@
 # ClearTask
 
-ClearTask is a revolutionary task management application designed to streamline your daily workflow, with a strong focus on accessibility for low-vision users. It combines cutting-edge technologies, including an intuitive interface with high contrast and large text, intelligent voice commands, and robust backend services, to help everyone stay organized and productive.
+ClearTask is a revolutionary task management application designed to streamline your daily workflow, with a strong focus on accessibility for low-vision users. It combines cutting-edge technologies, including an intuitive interface with high contrast and large text, intelligent voice commands, and task creation via AI email parsing, to help everyone stay organized and productive.
 
 ## Goal and Purpose
 
-The primary goal of ClearTask is to simplify task management, especially for low-vision users, by leveraging natural language processing and voice recognition, alongside high-contrast elements and large text for improved readability. Users can effortlessly create, update, and manage tasks using spoken commands, minimizing the need for manual input and maximizing efficiency. ClearTask aims to provide a seamless and natural interaction experience, making task management less of a chore and more of an integrated part of your day, with a strong emphasis on accessibility.
+The primary goal of ClearTask is to simplify task management, especially for low-vision users, by leveraging natural language processing and voice recognition, alongside high-contrast elements and large text for improved readability. Users can effortlessly create, update, and manage tasks using spoken commands and have AI pull tasks from emails, minimizing the need for manual input and maximizing efficiency. ClearTask aims to provide a seamless and natural interaction experience, making task management less of a chore and more of an integrated part of your day, with a strong emphasis on accessibility.
 
 ## Features
 
 *   **Voice-Activated Task Management**: Create, update, and complete tasks using simple voice commands.
 *   **Intelligent Task Parsing**: The backend utilizes advanced LLM (Large Language Model) capabilities to understand and process complex voice requests, extracting due dates, descriptions, and task names.
 *   **OAuth Integration**: Secure login and authentication via Google and Microsoft OAuth, ensuring your data is protected.
-*   **Email Ingestion**: Seamlessly convert emails into tasks using Gmail Push Notifications. See the setup guide below for details.
+*   **Email Ingestion**: Seamlessly convert emails forwarded to a gmail account, watched by the app, into tasks using Gmail Push Notifications. See the setup guide below for details.
 *   **Designed for Low-Vision Users**: Features like clear typography (Atkinson Hyperlegible font), high contrast elements, and voice-driven interaction are prioritized to enhance accessibility for users with low vision.
 *   **Intuitive User Interface**: A clean and responsive frontend built with React and TypeScript for an optimal user experience.
 *   **Offline Support**: Tasks are managed client-side using Dexie.js for IndexedDB storage, enabling offline access and synchronization.
