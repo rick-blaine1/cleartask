@@ -100,8 +100,11 @@ Parse the following transcribed text into a JSON object. The JSON object should 
 - due_date (string, YYYY-MM-DD or null): The due date of the task. Convert relative time expressions to absolute dates based on today's date.
 - is_completed (boolean): Whether the task is completed.
 - original_request (string): The original transcribed text.
-- intent (string): Categorize the user's intent as either "create_task" or "edit_task". If the user is referring to an existing task (e.g., "mark X as done", "change X to Y", "complete X"), set this to "edit_task".
-- task_id (string or null): If the intent is "edit_task", provide the ID of the task being edited by matching the user's description to the existing tasks list above. Otherwise, this should be null.
+- intent (string): Categorize the user's intent as "create_task", "edit_task", or "delete_task".
+  - If the user is referring to an existing task for modification (e.g., "mark X as done", "change X to Y", "complete X"), set this to "edit_task".
+  - If the user is explicitly asking to remove an existing task (e.g., "delete X", "remove Y"), set this to "delete_task".
+- task_id (string or null): If the intent is "edit_task" or "delete_task", provide the ID of the task being referred to by matching the user's description to the existing tasks list above. Otherwise, this should be null.
+
 
 Transcribed text: "${transcribedText}"
 

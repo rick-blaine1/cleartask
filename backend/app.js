@@ -17,6 +17,10 @@ import { validateLLMTaskOutput, createSafeFallbackTask, sanitizeForDatabase, LLM
 import { llmLogger } from './utils/llmLogger.js';
 import emailIngestionRoutes from './src/email_ingestion/index.js';
 import crypto from 'crypto';
+
+// In-memory store for pending delete confirmations
+const pendingDeleteTasks = new Map();
+
 import nodemailer from 'nodemailer';
 import { emailVerificationSchema } from './src/schemas/email.schema.js';
 import { getVerifiedUserIdsForSender } from './src/email_ingestion/emailVerification.js';
@@ -919,9 +923,9 @@ function buildApp() {
       // The LLM only suggests - the application enforces
       const dbClient = await pool.connect();
       try {
-        // Business logic validation: edit_task requires valid task_id
-        if (validatedTaskData.intent === "edit_task" && validatedTaskData.task_id) {
-          // Verify task exists and belongs to user before allowing edit
+        // Business logic validation: edit_task and delete_task require valid task_id
+        if ((validatedTaskData.intent === "edit_task" || validatedTaskData.intent === "delete_task") && validatedTaskData.task_id) {
+          // Verify task exists and belongs to user before allowing edit or delete
           const verifyResult = await dbClient.query(
             'SELECT id FROM tasks WHERE id = $1 AND user_id = $2',
             [validatedTaskData.task_id, request.user.id]
@@ -933,12 +937,12 @@ function buildApp() {
               requestId,
               userId: request.user.id,
               event: 'intent_downgraded',
-              originalIntent: 'edit_task',
+              originalIntent: validatedTaskData.intent,
               newIntent: 'create_task',
               taskId: validatedTaskData.task_id,
               reason: 'task_not_found_or_unauthorized',
               securitySignal: 'INTENT_DOWNGRADE'
-            }, 'Task not found or unauthorized - failing closed to create_task');
+            }, `Task not found or unauthorized for ${validatedTaskData.intent} - failing closed to create_task`);
             
             validatedTaskData.intent = 'create_task';
             validatedTaskData.task_id = null;
@@ -1002,6 +1006,58 @@ function buildApp() {
             
             reply.status(200).send(updateResult.rows[0]);
           }
+        } else if (validatedTaskData.intent === "delete_task" && validatedTaskData.task_id) {
+          llmLogger.info({
+            requestId,
+            userId: request.user.id,
+            event: 'delete_confirmation_requested',
+            operation: 'delete_task',
+            taskId: validatedTaskData.task_id
+          }, 'Requesting deletion confirmation from user');
+
+          // Generate a unique confirmation ID
+          const confirmationId = crypto.randomBytes(16).toString('hex');
+          
+          // Store the pending deletion with a 10-second timeout
+          const timeoutId = setTimeout(() => {
+            // Remove the pending deletion after timeout
+            if (pendingDeleteTasks.has(confirmationId)) {
+              pendingDeleteTasks.delete(confirmationId);
+              llmLogger.info({
+                requestId,
+                userId: request.user.id,
+                event: 'delete_confirmation_timeout',
+                confirmationId,
+                taskId: validatedTaskData.task_id
+              }, 'Delete confirmation timed out after 10 seconds');
+            }
+          }, 10000); // 10 seconds
+
+          // Store the pending deletion
+          pendingDeleteTasks.set(confirmationId, {
+            taskId: validatedTaskData.task_id,
+            userId: request.user.id,
+            requestId,
+            timeoutId,
+            createdAt: Date.now()
+          });
+
+          llmLogger.info({
+            requestId,
+            userId: request.user.id,
+            event: 'delete_confirmation_pending',
+            confirmationId,
+            taskId: validatedTaskData.task_id
+          }, 'Delete confirmation pending');
+
+          // Send confirmation prompt to frontend
+          reply.status(202).send({
+            requiresConfirmation: true,
+            confirmationId,
+            taskId: validatedTaskData.task_id,
+            message: 'Please confirm task deletion',
+            timeoutSeconds: 10
+          });
         } else {
           // Default to create_task (fail-closed behavior)
           llmLogger.info({
@@ -1044,6 +1100,110 @@ function buildApp() {
       }, 'Error processing task from voice');
       
       reply.status(500).send({ error: 'Failed to process task from voice.', details: error.message });
+    }
+  });
+
+  // Endpoint to handle delete confirmation
+  fastify.post('/api/tasks/confirm-delete/:confirmationId', { onRequest: [fastify.authenticate] }, async (request, reply) => {
+    try {
+      const { confirmationId } = request.params;
+      const { confirmed } = request.body;
+
+      llmLogger.info({
+        userId: request.user.id,
+        event: 'delete_confirmation_received',
+        confirmationId,
+        confirmed
+      }, 'Delete confirmation response received');
+
+      // Check if the confirmation exists
+      const pendingDelete = pendingDeleteTasks.get(confirmationId);
+
+      if (!pendingDelete) {
+        llmLogger.warn({
+          userId: request.user.id,
+          event: 'delete_confirmation_not_found',
+          confirmationId
+        }, 'Confirmation ID not found or expired');
+        
+        return reply.status(404).send({ error: 'Confirmation not found or expired.' });
+      }
+
+      // Verify the user owns this confirmation
+      if (pendingDelete.userId !== request.user.id) {
+        llmLogger.warn({
+          userId: request.user.id,
+          event: 'delete_confirmation_unauthorized',
+          confirmationId,
+          expectedUserId: pendingDelete.userId
+        }, 'User does not own this confirmation');
+        
+        return reply.status(403).send({ error: 'Unauthorized.' });
+      }
+
+      // Clear the timeout
+      clearTimeout(pendingDelete.timeoutId);
+
+      // Remove from pending map
+      pendingDeleteTasks.delete(confirmationId);
+
+      if (confirmed === true) {
+        // User confirmed - proceed with deletion
+        llmLogger.info({
+          requestId: pendingDelete.requestId,
+          userId: request.user.id,
+          event: 'delete_confirmed',
+          confirmationId,
+          taskId: pendingDelete.taskId
+        }, 'User confirmed deletion - proceeding');
+
+        const client = await pool.connect();
+        try {
+          const deleteResult = await client.query(
+            'DELETE FROM tasks WHERE id = $1 AND user_id = $2 RETURNING id',
+            [pendingDelete.taskId, request.user.id]
+          );
+
+          if (deleteResult.rowCount === 0) {
+            llmLogger.error({
+              requestId: pendingDelete.requestId,
+              userId: request.user.id,
+              event: 'database_operation_failed',
+              operation: 'delete_task',
+              taskId: pendingDelete.taskId,
+              reason: 'task_not_found'
+            }, 'Task deletion failed - task not found');
+            
+            reply.status(404).send({ error: 'Task not found or user not authorized for deletion.' });
+          } else {
+            llmLogger.info({
+              requestId: pendingDelete.requestId,
+              userId: request.user.id,
+              event: 'database_operation_success',
+              operation: 'delete_task',
+              taskId: pendingDelete.taskId
+            }, 'Task deleted successfully after confirmation');
+            
+            reply.status(204).send(); // No Content
+          }
+        } finally {
+          client.release();
+        }
+      } else {
+        // User cancelled or denied
+        llmLogger.info({
+          requestId: pendingDelete.requestId,
+          userId: request.user.id,
+          event: 'delete_cancelled',
+          confirmationId,
+          taskId: pendingDelete.taskId
+        }, 'User cancelled deletion');
+
+        reply.status(200).send({ message: 'Deletion cancelled.' });
+      }
+    } catch (error) {
+      fastify.log.error('Error processing delete confirmation:', error);
+      reply.status(500).send({ error: 'Failed to process confirmation.', details: error.message });
     }
   });
 
