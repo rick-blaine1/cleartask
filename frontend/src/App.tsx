@@ -6,7 +6,7 @@ import HelpPage from './components/HelpPage';
 import VerifyEmail from './components/VerifyEmail';
 import type { Task } from './db';
 import { db } from './db';
-import { speak, speakTaskCreated, speakAmbiguousInput } from './tts';
+import { speak, speakTaskCreated, speakAmbiguousInput, speakTaskUpdated } from './tts';
 import { Routes, Route, NavLink, useLocation } from 'react-router-dom';
 import './App.css';
 
@@ -290,15 +290,16 @@ function App() {
         if (response.status === 201) {
           // New task created - add to list
           setTasks(prevTasks => sortTasks([...prevTasks, taskData]));
+          speakTaskCreated();
         } else if (response.status === 200) {
           // Existing task updated - replace in list
           setTasks(prevTasks => sortTasks(prevTasks.map(task =>
             task.id === taskData.id ? taskData : task
           )));
+          speakTaskUpdated();
         }
 
         setTranscript(''); // Clear the transcript input
-        speakTaskCreated();
       } else {
         const errorData = await response.json();
         devError('Failed to send voice transcript to backend, status:', response.status, 'error:', errorData);
@@ -488,7 +489,7 @@ function App() {
         setTasks(prevTasks =>
           sortTasks(prevTasks.map(t => (t.id === updatedTask.id ? updatedTask : t)))
         );
-        speakTaskCreated(); // Reuse for completion/incompletion feedback
+        speakTaskUpdated(); // Reuse for completion/incompletion feedback
       } else {
         const errorData = await response.json();
         devError('Failed to toggle task completion, status:', response.status, 'error:', errorData);
