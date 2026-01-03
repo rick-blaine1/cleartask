@@ -658,6 +658,14 @@ function App() {
             <button onClick={handleMicrosoftLogin}>
               Login with Microsoft
             </button>
+            {!isLoggedIn && (
+              <div className="beta-info-box">
+                <p>This app is still in beta</p>
+                <p>Only invited users have access. If you'd like to be invited, contact the Administrator</p>
+                <p>The administrator will have access to view any emails sent to the app's email</p>
+                <p>The administrator has access to view the tasks you create</p>
+              </div>
+            )}
           </>
         )}
       </div>

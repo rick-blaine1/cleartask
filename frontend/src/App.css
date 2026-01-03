@@ -343,6 +343,26 @@
 }
 
 /* Delete Confirmation Modal Styles */
+.beta-info-box {
+  background-color: #333;
+  color: #fff;
+  border: 1px solid #666;
+  border-radius: 8px;
+  padding: 15px;
+  margin-top: 20px;
+  text-align: left;
+  font-size: 0.9em;
+}
+
+.beta-info-box p {
+  margin-bottom: 5px;
+  line-height: 1.4;
+}
+
+.beta-info-box p:last-child {
+  margin-bottom: 0;
+}
+
 .modal-overlay {
   position: fixed;
   top: 0;
