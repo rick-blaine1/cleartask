@@ -146,6 +146,56 @@
   cursor: not-allowed;
 }
 
+.main-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 20px;
+  justify-content: center;
+  align-items: center;
+}
+
+.nav-button {
+  border-radius: 8px;
+  border: 2px solid var(--text-primary);
+  padding: var(--standard-padding);
+  font-size: 1rem;
+  font-weight: 500;
+  font-family: inherit;
+  background-color: var(--bg-color);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all 0.25s;
+  min-width: var(--min-tap-target);
+  height: var(--min-tap-target); /* Explicitly set height for consistency */
+  box-sizing: border-box; /* Include padding and border in the height */
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  margin: 0 5px; /* Adds some space between buttons */
+  text-decoration: none; /* Keep for NavLink */
+}
+
+.nav-button:hover {
+  background-color: var(--text-primary);
+  color: var(--bg-color);
+}
+
+.nav-button:focus,
+.nav-button:focus-visible {
+  outline: 4px solid var(--color-priority);
+  outline-offset: 2px;
+}
+
+.nav-button.active {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.nav-button.active:hover {
+  background-color: var(--text-primary);
+  color: var(--bg-color);
+}
+
 /* Authorized Senders Page Styles */
 .authorized-senders-container {
   width: 100%;

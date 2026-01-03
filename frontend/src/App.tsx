@@ -2,11 +2,12 @@ import React, { useEffect, useState, useRef } from 'react';
 import TaskCard from './components/TaskCard';
 import AuthorizedSenders from './components/AuthorizedSenders';
 import MagicLinkSuccess from './components/MagicLinkSuccess';
+import HelpPage from './components/HelpPage';
 import VerifyEmail from './components/VerifyEmail';
 import type { Task } from './db';
 import { db } from './db';
 import { speak, speakTaskCreated, speakAmbiguousInput } from './tts';
-import { Routes, Route, Link, useLocation } from 'react-router-dom';
+import { Routes, Route, NavLink, useLocation } from 'react-router-dom';
 import './App.css';
 
 // Development-only logging utility
@@ -29,6 +30,7 @@ function App() {
   const recognitionRef = useRef<any>(null);
   const location = useLocation();
   const isAuthorizedSendersPage = location.pathname === '/authorized-senders';
+  const isHelpPage = location.pathname === '/help';
 
   const audioContextRef = useRef<AudioContext | null>(null);
 
@@ -424,18 +426,35 @@ function App() {
         )}
         {isLoggedIn ? (
           <>
-            <button onClick={handleGoogleLogout}>
-              Logout
-            </button>
-            {!isAuthorizedSendersPage && (
-              <button onClick={isListening ? stopListening : startListening} disabled={!('webkitSpeechRecognition' in window)}>
-                {isListening ? 'Stop Listening' : 'Start Voice Input'}
-              </button>
-            )}
-            {transcript && <p>Transcript: {transcript}</p>}
-            <Link to={isAuthorizedSendersPage ? "/" : "/authorized-senders"}>
-              <button>{isAuthorizedSendersPage ? "Back to Task List" : "Manage Authorized Senders"}</button>
-            </Link>
+            <nav className="main-nav">
+              {!isHelpPage ? (
+                <>
+                  <NavLink to="/" onClick={handleGoogleLogout} className="nav-button">
+                    Logout
+                  </NavLink>
+                  {!isAuthorizedSendersPage && (
+                    <button onClick={isListening ? stopListening : startListening} disabled={!('webkitSpeechRecognition' in window)} className="nav-button">
+                      {isListening ? 'Stop Listening' : 'Start Voice Input'}
+                    </button>
+                  )}
+                  <NavLink to={isAuthorizedSendersPage ? "/" : "/authorized-senders"} className="nav-button">
+                    {isAuthorizedSendersPage ? "Back to Task List" : "Manage Authorized Senders"}
+                  </NavLink>
+                  <NavLink to="/help" className="nav-button">
+                    Help
+                  </NavLink>
+                </>
+              ) : (
+                <>
+                  <NavLink to="/" onClick={handleGoogleLogout} className="nav-button">
+                    Logout
+                  </NavLink>
+                  <NavLink to="/" className="nav-button">
+                    Back to Task List
+                  </NavLink>
+                </>
+              )}
+            </nav>
           </>
         ) : (
           <>
@@ -474,6 +493,7 @@ function App() {
         <Route path="/authorized-senders" element={<AuthorizedSenders />} />
         <Route path="/verify-email" element={<VerifyEmail />} />
         <Route path="/magic-link-success" element={<MagicLinkSuccess />} />
+        <Route path="/help" element={<HelpPage />} />
       </Routes>
     </>
   );
