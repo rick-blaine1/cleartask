@@ -54,8 +54,11 @@ function buildApp() {
   // Decorate fastify with invitedUsers
   fastify.decorate('invitedUsers', invitedUsers);
 
+  if (!process.env.JWT_SECRET) {
+    throw new Error('JWT_SECRET environment variable is required');
+  }
   fastify.register(fastifyJwt, {
-    secret: process.env.JWT_SECRET || 'supersecretjwtkey'
+    secret: process.env.JWT_SECRET
   });
 
   fastify.register(fastifyOAuth2, {
@@ -513,8 +516,11 @@ function buildApp() {
     try {
       const client = await pool.connect();
       const showArchived = request.query.showArchived === 'true';
+      const query = showArchived 
+        ? 'SELECT * FROM tasks WHERE user_id = $1 ORDER BY due_date ASC NULLS FIRST'
+        : 'SELECT * FROM tasks WHERE user_id = $1 AND is_archived = FALSE ORDER BY due_date ASC NULLS FIRST';
       const result = await client.query(
-        `SELECT * FROM tasks WHERE user_id = $1 ${showArchived ? '' : 'AND is_archived = FALSE'} ORDER BY due_date ASC NULLS FIRST`,
+        query,
         [request.user.id]
       );
       client.release();
