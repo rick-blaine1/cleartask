@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
+import { devLog, devError } from '../utils/devLog';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 
 const VerifyEmail: React.FC = () => {
@@ -12,7 +13,7 @@ const VerifyEmail: React.FC = () => {
     const verifyEmail = async () => {
       // Prevent duplicate verification attempts (React 18 Strict Mode runs effects twice)
       if (hasVerified.current) {
-        console.log('[VERIFY-EMAIL] Already verified, skipping duplicate call');
+        devLog('[VERIFY-EMAIL] Already verified, skipping duplicate call');
         return;
       }
       hasVerified.current = true;
@@ -25,12 +26,12 @@ const VerifyEmail: React.FC = () => {
       }
 
       try {
-        console.log('[VERIFY-EMAIL] Starting verification request');
+        devLog('[VERIFY-EMAIL] Starting verification request');
         const response = await fetch(
           `${import.meta.env.VITE_APP_API_BASE_URL}/api/email-ingestion/verify-magic-link?token=${token}`
         );
 
-        console.log('[VERIFY-EMAIL] Response received:', {
+        devLog('[VERIFY-EMAIL] Response received:', {
           status: response.status,
           statusText: response.statusText,
           ok: response.ok,
@@ -39,7 +40,7 @@ const VerifyEmail: React.FC = () => {
 
         if (response.ok) {
           const successData = await response.json();
-          console.log('[VERIFY-EMAIL] Success response data:', successData);
+          devLog('[VERIFY-EMAIL] Success response data:', successData);
           setStatus('success');
           setMessage('Email verified successfully!');
           
@@ -48,14 +49,14 @@ const VerifyEmail: React.FC = () => {
             navigate('/authorized-senders');
           }, 2000);
         } else {
-          console.log('[VERIFY-EMAIL] Non-OK response, parsing error data');
+          devLog('[VERIFY-EMAIL] Non-OK response, parsing error data');
           const errorData = await response.json();
-          console.log('[VERIFY-EMAIL] Error response data:', errorData);
+          devLog('[VERIFY-EMAIL] Error response data:', errorData);
           setStatus('error');
           setMessage(errorData.message || 'Failed to verify email.');
         }
       } catch (error) {
-        console.error('[VERIFY-EMAIL] Exception caught:', error);
+        devError('[VERIFY-EMAIL] Exception caught:', error);
         setStatus('error');
         setMessage('Network error. Please try again later.');
       }

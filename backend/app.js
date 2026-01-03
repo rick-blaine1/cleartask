@@ -71,7 +71,7 @@ function buildApp() {
   // Register Microsoft OAuth2 without startRedirectPath to avoid route conflict
   fastify.register(fastifyOAuth2, {
     name: 'microsoftOAuth2', // Unique name for Microsoft OAuth
-    scope: ['openid', 'profile', 'email', 'offline_access'], // Define necessary scopes
+    scope: ['openid', 'profile', 'email', 'offline_access', 'User.Read'], // Add User.Read scope for Graph API access
     credentials: {
       client: {
         id: process.env.MICROSOFT_CLIENT_ID || '',
@@ -577,23 +577,16 @@ function buildApp() {
   });
 
   fastify.get('/api/auth/microsoft/callback', async function (request, reply) {
-    fastify.log.info('=== Microsoft OAuth Callback Hit ===');
-    fastify.log.info(`Query params: ${JSON.stringify(request.query)}`);
-    fastify.log.info(`Full URL: ${request.url}`);
     try {
-      fastify.log.info('Attempting to get access token from authorization code flow.');
       const { token } = await this.microsoftOAuth2.getAccessTokenFromAuthorizationCodeFlow(request);
-      fastify.log.info('Successfully received access token.');
-      fastify.log.info(`Access token: ${token.access_token ? '[REDACTED]' : 'N/A'}`);
-      fastify.log.info(`Refresh token: ${token.refresh_token ? '[REDACTED]' : 'N/A'}`);
-
-      fastify.log.info('Attempting to fetch user info from Microsoft Graph API.');
+      
+      // Fetch the user's Microsoft profile using the access token
       const userInfoResponse = await fetch('https://graph.microsoft.com/v1.0/me', {
         headers: {
           Authorization: `Bearer ${token.access_token}`,
         },
       });
-      fastify.log.info(`Microsoft Graph API response status: ${userInfoResponse.status}`);
+
       if (!userInfoResponse.ok) {
         const errorBody = await userInfoResponse.text();
         fastify.log.error(`Microsoft Graph API error response: ${errorBody}`);
@@ -613,7 +606,7 @@ function buildApp() {
         return reply.redirect(`${process.env.FRONTEND_URL || 'http://localhost:5173'}/#error=access_denied`);
       }
 
-      // Database operations (see Section 2.3)
+      // Database operations
       const client = await pool.connect();
       try {
         await client.query(

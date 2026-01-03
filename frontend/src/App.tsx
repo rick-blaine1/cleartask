@@ -9,6 +9,9 @@ import { speak, speakTaskCreated, speakAmbiguousInput } from './tts';
 import { Routes, Route, Link, useLocation } from 'react-router-dom';
 import './App.css';
 
+// Development-only logging utility
+import { devLog, devError } from './utils/devLog';
+
 declare global {
   interface Window {
     webkitSpeechRecognition: any;
@@ -166,9 +169,11 @@ function App() {
         const data = await response.json();
         setTasks(sortTasks(data));
       } else {
+        devError('Failed to fetch tasks, status:', response.status);
         setTasks([]);
       }
     } catch (error) {
+      devError('Error fetching tasks:', error);
       setTasks([]);
     }
   };
@@ -207,11 +212,11 @@ function App() {
         setPendingDeletionTask(null);
         setIsUILocked(false);
       } else {
-
+        devError('Failed to delete task, status:', response.status);
         alert('Failed to delete task. Please try again.');
       }
     } catch (error) {
-
+      devError('Error deleting task:', error);
       alert('Error deleting task. Please try again.');
     }
   };
@@ -248,9 +253,11 @@ function App() {
         speakTaskCreated(); // Reuse for completion/incompletion feedback
       } else {
         const errorData = await response.json();
+        devError('Failed to toggle task completion, status:', response.status, 'error:', errorData);
         speakAmbiguousInput();
       }
     } catch (error) {
+      devError('Error toggling task completion:', error);
       speakAmbiguousInput();
     }
   };
@@ -277,7 +284,7 @@ function App() {
       oscillator.start(audioContextRef.current.currentTime);
       oscillator.stop(audioContextRef.current.currentTime + duration / 1000);
     } else {
-      // AudioContext not available
+      devLog('AudioContext not available.');
     }
   };
 
@@ -314,6 +321,7 @@ function App() {
     localStorage.removeItem('jwt');
     setIsLoggedIn(false);
     setTasks([]);
+    window.location.href = '/'; // Redirect to root URL
   };
 
   const handleSaveTaskDescription = async (taskId: string, newTitle: string, newDescription: string, newDate: string) => {
@@ -350,11 +358,11 @@ function App() {
         );
       } else {
         const errorData = await response.json();
-
+        devError('Failed to save task, status:', response.status, 'error:', errorData);
         alert('Failed to save task. Please try again.');
       }
     } catch (error) {
-
+      devError('Error saving task:', error);
       alert('Failed to save task. Please try again.');
     }
   };
@@ -397,9 +405,11 @@ function App() {
         speakTaskCreated();
       } else {
         const errorData = await response.json();
+        devError('Failed to send voice transcript to backend, status:', response.status, 'error:', errorData);
         speakAmbiguousInput();
       }
     } catch (error) {
+      devError('Error communicating with the backend to create task:', error);
       alert('Error communicating with the backend to create task.');
     }
   };
