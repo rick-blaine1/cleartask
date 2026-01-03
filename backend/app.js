@@ -26,8 +26,29 @@ import cron from 'node-cron';
 
 const EMAIL_VERIFICATION_TOKEN_EXPIRATION_HOURS = 24;
 
+// Helper function to check if an email is in the whitelist (supports wildcards)
+function isEmailWhitelisted(email, invitedUsers) {
+  if (!invitedUsers || invitedUsers.length === 0) {
+    return true; // If no whitelist is configured, all emails are allowed
+  }
+
+  return invitedUsers.some(pattern => {
+    // Convert wildcard pattern to regex
+    const regex = new RegExp(`^${pattern.replace(/\./g, '\\.').replace(/\*/g, '.*')}$`, 'i');
+    return regex.test(email);
+  });
+}
+
 function buildApp() {
   const fastify = Fastify({ logger: true });
+
+  // Parse INVITED_USERS environment variable
+  const invitedUsers = process.env.INVITED_USERS ?
+    process.env.INVITED_USERS.split(',').map(email => email.trim()) :
+    [];
+
+  // Decorate fastify with invitedUsers
+  fastify.decorate('invitedUsers', invitedUsers);
 
   fastify.register(fastifyJwt, {
     secret: process.env.JWT_SECRET || 'supersecretjwtkey'
@@ -521,6 +542,12 @@ function buildApp() {
 
       const googleUserProfile = await userInfoResponse.json();
       
+      // Check if email is whitelisted
+      if (!isEmailWhitelisted(googleUserProfile.email, invitedUsers)) {
+        fastify.log.warn(`Login attempt from non-whitelisted email: ${googleUserProfile.email}`);
+        return reply.redirect(`${process.env.FRONTEND_URL || 'http://localhost:5173'}/#error=access_denied`);
+      }
+      
       // Use the Google user's unique ID as the user ID
       const userId = `google-${googleUserProfile.id}`;
       
@@ -579,6 +606,12 @@ function buildApp() {
       const userId = `microsoft-${microsoftUserProfile.id}`; // Prefix to avoid collisions
       const email = microsoftUserProfile.mail || microsoftUserProfile.userPrincipalName; // Get email
       const name = microsoftUserProfile.displayName;
+
+      // Check if email is whitelisted
+      if (!isEmailWhitelisted(email, invitedUsers)) {
+        fastify.log.warn(`Login attempt from non-whitelisted email: ${email}`);
+        return reply.redirect(`${process.env.FRONTEND_URL || 'http://localhost:5173'}/#error=access_denied`);
+      }
 
       // Database operations (see Section 2.3)
       const client = await pool.connect();

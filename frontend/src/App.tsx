@@ -22,6 +22,7 @@ function App() {
   const [isUILocked, setIsUILocked] = useState<boolean>(false); // New state for UI lock
   const [isListening, setIsListening] = useState<boolean>(false);
   const [transcript, setTranscript] = useState<string>('');
+  const [authError, setAuthError] = useState<string | null>(null);
   const recognitionRef = useRef<any>(null);
   const location = useLocation();
   const isAuthorizedSendersPage = location.pathname === '/authorized-senders';
@@ -132,14 +133,21 @@ function App() {
     const hash = window.location.hash;
     const params = new URLSearchParams(hash.substring(1));
     const token = params.get('token');
+    const error = params.get('error');
 
-    if (token) {
+    if (error === 'access_denied') {
+      setAuthError('Access Denied: Your email is not on the invited users list. Please contact the administrator for access.');
+      window.location.hash = ''; // Clean the URL
+      setIsLoggedIn(false);
+    } else if (token) {
       localStorage.setItem('jwt', token);
       setIsLoggedIn(true);
+      setAuthError(null);
       window.location.hash = ''; // Clean the URL
       fetchTasks(token);
     } else if (localStorage.getItem('jwt')) {
       setIsLoggedIn(true);
+      setAuthError(null);
       fetchTasks(localStorage.getItem('jwt'));
     } else {
       setIsLoggedIn(false);
@@ -399,6 +407,11 @@ function App() {
   return (
     <>
       <div className="card">
+        {authError && (
+          <div className="auth-error-message">
+            {authError}
+          </div>
+        )}
         {isLoggedIn ? (
           <>
             <button onClick={handleGoogleLogout}>
