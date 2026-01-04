@@ -162,9 +162,12 @@
     width: 100%;
   }
   
-  .main-nav .nav-button {
+  .main-nav .nav-button,
+  .main-nav button.nav-button {
     width: 100%;
     min-height: var(--min-tap-target);
+    height: auto; /* Allow height to grow with content */
+    margin: 0; /* Remove horizontal margins on mobile */
   }
 }
 
@@ -366,12 +369,19 @@
   margin-top: 20px;
   text-align: left;
   font-size: 1rem; /* Match base font size (24px) */
+  box-sizing: border-box; /* Include padding and border in width */
+  width: 100%; /* Take full width of container */
+  max-width: 100%; /* Prevent overflow */
+  overflow-wrap: break-word; /* Break long words */
+  word-wrap: break-word; /* Legacy support */
 }
 
 .beta-info-box p {
   margin-bottom: 8px;
   line-height: 1.5; /* Match base line height */
   font-size: 1rem; /* Match base font size (24px) */
+  overflow-wrap: break-word; /* Break long words */
+  word-wrap: break-word; /* Legacy support */
 }
 
 /* Mobile responsiveness - maintain consistent font size */
