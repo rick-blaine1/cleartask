@@ -29,6 +29,9 @@ FROM nginx:stable-alpine AS production
 # Copy the static 'dist' folder from build stage to Nginx's web root
 COPY --from=build /app/dist /usr/share/nginx/html
 
+# Copy custom Nginx configuration with reverse proxy rules
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+
 # EXPOSE 80 is the standard for HTTP traffic
 EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]
