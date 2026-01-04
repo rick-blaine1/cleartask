@@ -299,12 +299,23 @@ export function sanitizeUserInput(input) {
     return String(input);
   }
   
-  // Remove potential delimiter injection attempts
   return input
+    // Normalize Unicode to prevent homograph attacks
+    .normalize('NFKC')
+    // Remove control characters except newlines and tabs
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]/g, '')
+    // Remove excessive whitespace
+    .replace(/\s+/g, ' ')
+    .trim()
+    // Remove delimiter injection attempts
     .replace(/<USER_INPUT_START>/gi, '[REMOVED]')
     .replace(/<USER_INPUT_END>/gi, '[REMOVED]')
     .replace(/# SYSTEM INSTRUCTIONS/gi, '[REMOVED]')
-    .replace(/# DEVELOPER INSTRUCTIONS/gi, '[REMOVED]');
+    .replace(/# DEVELOPER INSTRUCTIONS/gi, '[REMOVED]')
+    // Remove potential prompt injection patterns
+    .replace(/ignore (previous|all|above) instructions?/gi, '[REMOVED]')
+    .replace(/you are now/gi, '[REMOVED]')
+    .replace(/new instructions?:/gi, '[REMOVED]');
 }
 
 /**

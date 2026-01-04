@@ -21,17 +21,9 @@ const AuthorizedSenders: React.FC = () => {
   const fetchAuthorizedSenders = async () => {
     setLoading(true);
     setError(null);
-    const token = localStorage.getItem('jwt');
-    if (!token) {
-      setError('User not authenticated.');
-      setLoading(false);
-      return;
-    }
     try {
       const response = await fetch(`${import.meta.env.VITE_APP_API_BASE_URL}/api/authorized-senders`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
+        credentials: 'include', // Include cookies in request
       });
       if (response.ok) {
         const data: AuthorizedSender[] = await response.json();
@@ -51,17 +43,11 @@ const AuthorizedSenders: React.FC = () => {
     if (!emailInput) return;
     setLoading(true);
     setError(null);
-    const token = localStorage.getItem('jwt');
-    if (!token) {
-      setError('User not authenticated.');
-      setLoading(false);
-      return;
-    }
     try {
       const response = await fetch(`${import.meta.env.VITE_APP_API_BASE_URL}/api/authorized-senders`, {
         method: 'POST',
+        credentials: 'include', // Include cookies in request
         headers: {
-          'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ email: emailInput }),
@@ -83,18 +69,10 @@ const AuthorizedSenders: React.FC = () => {
   const handleDeleteSender = async (id: string) => {
     setLoading(true);
     setError(null);
-    const token = localStorage.getItem('jwt');
-    if (!token) {
-      setError('User not authenticated.');
-      setLoading(false);
-      return;
-    }
     try {
       const response = await fetch(`${import.meta.env.VITE_APP_API_BASE_URL}/api/authorized-senders/${id}`, {
         method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
+        credentials: 'include', // Include cookies in request
       });
       if (response.ok) {
         fetchAuthorizedSenders(); // Refresh the list
@@ -112,18 +90,10 @@ const AuthorizedSenders: React.FC = () => {
   const handleResendVerification = async (id: string) => {
     setLoading(true);
     setError(null);
-    const token = localStorage.getItem('jwt');
-    if (!token) {
-      setError('User not authenticated.');
-      setLoading(false);
-      return;
-    }
     try {
       const response = await fetch(`${import.meta.env.VITE_APP_API_BASE_URL}/api/authorized-senders/${id}/resend-verification`, {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
+        credentials: 'include', // Include cookies in request
       });
       if (response.ok) {
         alert('Verification email sent!');

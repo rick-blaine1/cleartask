@@ -97,6 +97,7 @@ function App() {
 
   // Cleanup function for delete confirmation state
   const cleanupDeleteConfirmation = useCallback(() => {
+    devLog('[VOICE DEBUG] Cleaning up deletion confirmation state');
     if (deleteTimeoutRef.current) {
       clearTimeout(deleteTimeoutRef.current);
       deleteTimeoutRef.current = null;
@@ -111,6 +112,7 @@ function App() {
     setDeleteConfirmationTimer(10);
     setIsUILocked(false);
     setIsAwaitingDeleteConfirmation(false);
+    devLog('[VOICE DEBUG] isAwaitingDeleteConfirmation set to FALSE');
   }, []);
 
   const startListening = useCallback(() => {
@@ -133,19 +135,13 @@ function App() {
       return;
     }
 
-    const token = localStorage.getItem('jwt');
-    if (!token) {
-      cleanupDeleteConfirmation();
-      return;
-    }
-
     try {
       const response = await fetch(
         `${import.meta.env.VITE_APP_API_BASE_URL}/api/tasks/confirm-delete/${confirmationId}`,
         {
           method: 'POST',
+          credentials: 'include', // Include cookies in request
           headers: {
-            'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({ confirmed: true }),
@@ -183,19 +179,13 @@ function App() {
       return;
     }
 
-    const token = localStorage.getItem('jwt');
-    if (!token) {
-      cleanupDeleteConfirmation();
-      return;
-    }
-
     try {
       const response = await fetch(
         `${import.meta.env.VITE_APP_API_BASE_URL}/api/tasks/confirm-delete/${confirmationId}`,
         {
           method: 'POST',
+          credentials: 'include', // Include cookies in request
           headers: {
-            'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({ confirmed: false }),
@@ -213,10 +203,6 @@ function App() {
   }, [confirmationId, cleanupDeleteConfirmation]);
 
   const sendVoiceTranscriptToBackend = useCallback(async (transcript: string) => {
-    const token = localStorage.getItem('jwt');
-    if (!token) {
-      return;
-    }
     try {
       const apiUrl = `${import.meta.env.VITE_APP_API_BASE_URL}/api/tasks/create-from-voice`;
       const clientDate = new Date(); // Get current date/time on client
@@ -225,8 +211,8 @@ function App() {
 
       const response = await fetch(apiUrl, {
         method: 'POST',
+        credentials: 'include', // Include cookies in request
         headers: {
-          'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ transcribedText: transcript, clientDate: clientDate.toISOString(), clientTimezoneOffset }),
@@ -236,11 +222,14 @@ function App() {
         // Backend is requesting confirmation for deletion
         const confirmationData = await response.json();
         
+        devLog('[VOICE DEBUG] Received deletion confirmation request from backend:', confirmationData);
+        
         if (confirmationData.requiresConfirmation && confirmationData.confirmationId && confirmationData.taskId) {
           // Find the task to delete using tasksRef to get current state
           const taskToDelete = tasksRef.current.find(task => task.id === confirmationData.taskId);
           
           if (taskToDelete) {
+            devLog('[VOICE DEBUG] Setting up deletion confirmation state for task:', taskToDelete.task_name);
             // Set up confirmation state
             setPendingDeletionTask(taskToDelete);
             setConfirmationId(confirmationData.confirmationId);
@@ -249,11 +238,14 @@ function App() {
             setDeleteConfirmationTimer(10);
             setIsAwaitingDeleteConfirmation(true); // Set state to await confirmation
             
+            devLog('[VOICE DEBUG] isAwaitingDeleteConfirmation set to TRUE');
+            
             // Speak confirmation prompt - delay starting listening to avoid capturing TTS
             speak(`Are you sure you want to delete task: ${taskToDelete.task_name}?`);
             
             // Delay starting listening to allow TTS to finish
             setTimeout(() => {
+              devLog('[VOICE DEBUG] Starting listening for confirmation response');
               startListening();
             }, 2000); // 2 second delay to allow TTS to complete
             
@@ -352,13 +344,25 @@ function App() {
       // Stop listening immediately to prevent feedback loops and capture of TTS
       stopListening();
 
+      // DIAGNOSTIC: Log the state when voice input is received
+      devLog('[VOICE DEBUG] Voice input received:', {
+        transcript: speechResult,
+        isAwaitingDeleteConfirmation,
+        confirmationId,
+        pendingDeletionTaskId: pendingDeletionTask?.id
+      });
+
       if (isAwaitingDeleteConfirmation) {
+        devLog('[VOICE DEBUG] Handling as deletion confirmation');
         // Using .includes() for more robust matching against potential extra words caught by speech recognition
         if (speechResult.toLowerCase().includes('yes')) {
+          devLog('[VOICE DEBUG] User confirmed deletion');
           handleConfirmDeletion();
         } else if (speechResult.toLowerCase().includes('no')) {
+          devLog('[VOICE DEBUG] User cancelled deletion');
           handleCancelDeletion();
         } else {
+          devLog('[VOICE DEBUG] Ambiguous confirmation response');
           speak('Please say yes or no to confirm.');
           // Re-enable listening briefly after speaking to allow TTS to finish
           setTimeout(() => {
@@ -366,6 +370,7 @@ function App() {
           }, 1500);
         }
       } else {
+        devLog('[VOICE DEBUG] Sending to backend as normal voice input');
         // Automatically send the speech result to the backend
         sendVoiceTranscriptToBackend(speechResult);
       }
@@ -375,40 +380,54 @@ function App() {
   useEffect(() => {
     const hash = window.location.hash;
     const params = new URLSearchParams(hash.substring(1));
-    const token = params.get('token');
+    const loginSuccess = params.get('login');
     const error = params.get('error');
 
     if (error === 'access_denied') {
       setAuthError('Access Denied: Your email is not on the invited users list. Please contact the administrator for access.');
       window.location.hash = ''; // Clean the URL
       setIsLoggedIn(false);
-    } else if (token) {
-      localStorage.setItem('jwt', token);
+    } else if (loginSuccess === 'success') {
+      // JWT is now in httpOnly cookie, no need to store in localStorage
       setIsLoggedIn(true);
       setAuthError(null);
       window.location.hash = ''; // Clean the URL
-      fetchTasks(token);
-    } else if (localStorage.getItem('jwt')) {
-      setIsLoggedIn(true);
-      setAuthError(null);
-      fetchTasks(localStorage.getItem('jwt'));
+      fetchTasks();
     } else {
-      setIsLoggedIn(false);
+      // Check if user is already logged in by attempting to fetch tasks
+      // If JWT cookie exists and is valid, this will succeed
+      checkAuthStatus();
     }
   }, []);
+
+  const checkAuthStatus = async () => {
+    try {
+      const response = await fetch(`${import.meta.env.VITE_APP_API_BASE_URL}/api/tasks`, {
+        credentials: 'include', // Include cookies in request
+      });
+      if (response.ok) {
+        setIsLoggedIn(true);
+        setAuthError(null);
+        const data = await response.json();
+        setTasks(sortTasks(data));
+      } else {
+        setIsLoggedIn(false);
+      }
+    } catch (error) {
+      devError('Error checking auth status:', error);
+      setIsLoggedIn(false);
+    }
+  };
 
   // Keep tasksRef in sync with tasks state
   useEffect(() => {
     tasksRef.current = tasks;
   }, [tasks]);
 
-  const fetchTasks = async (token: string | null) => {
-    if (!token) return;
+  const fetchTasks = async () => {
     try {
       const response = await fetch(`${import.meta.env.VITE_APP_API_BASE_URL}/api/tasks`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
+        credentials: 'include', // Include cookies in request
       });
       if (response.ok) {
         const data = await response.json();
@@ -437,17 +456,10 @@ function App() {
   };
 
   const handleDeleteTask = async (taskId: string) => {
-    const token = localStorage.getItem('jwt');
-    if (!token) {
-      return;
-    }
-
     try {
       const response = await fetch(`${import.meta.env.VITE_APP_API_BASE_URL}/api/tasks/${taskId}`, {
         method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
+        credentials: 'include', // Include cookies in request
       });
 
       if (response.ok) {
@@ -465,11 +477,6 @@ function App() {
   };
 
   const handleToggleComplete = async (task: Task) => {
-    const token = localStorage.getItem('jwt');
-    if (!token) {
-      return;
-    }
-
     try {
       // Send a more explicit command with the task ID to help the LLM
       const newCompletionStatus = !task.is_completed;
@@ -477,8 +484,8 @@ function App() {
       
       const response = await fetch(`${import.meta.env.VITE_APP_API_BASE_URL}/api/tasks/create-from-voice`, {
         method: 'POST',
+        credentials: 'include', // Include cookies in request
         headers: {
-          'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -553,7 +560,7 @@ function App() {
     window.location.href = `${import.meta.env.VITE_APP_API_BASE_URL}/api/auth/microsoft`;
   };
 
-  const handleGoogleLogout = () => {
+  const handleGoogleLogout = async () => {
     // Ensure AudioContext is initialized before using it
     initAudioContext();
     if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
@@ -561,26 +568,29 @@ function App() {
     }
     playAudioFeedback(220, 150); // Example: A lower tone
     triggerHapticFeedback([100, 50, 100]); // Example: A double vibration
-    localStorage.removeItem('jwt');
+    
+    try {
+      // Call backend logout endpoint to clear cookie
+      await fetch(`${import.meta.env.VITE_APP_API_BASE_URL}/api/auth/logout`, {
+        method: 'POST',
+        credentials: 'include', // Include cookies in request
+      });
+    } catch (error) {
+      devError('Error during logout:', error);
+    }
+    
     setIsLoggedIn(false);
     setTasks([]);
     window.location.href = '/'; // Redirect to root URL
   };
 
   const handleSaveTaskDescription = async (taskId: string, newTitle: string, newDescription: string, newDate: string) => {
-    const token = localStorage.getItem('jwt');
-    if (!token) {
-
-      alert('You must be logged in to save changes.');
-      return;
-    }
-
     try {
       // Update in backend
       const response = await fetch(`${import.meta.env.VITE_APP_API_BASE_URL}/api/tasks/${taskId}`, {
         method: 'PUT',
+        credentials: 'include', // Include cookies in request
         headers: {
-          'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({

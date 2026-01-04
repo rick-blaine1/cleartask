@@ -6,6 +6,7 @@ import { isSenderVerified, getVerifiedUserIdsForSender } from './emailVerificati
 import { isMessageIdLocked, addMessageIdToLockTable } from './messageIdService.js';
 import { getStoredHistoryId, updateStoredHistoryId } from './gmailWatchService.js';
 import { createSafeFallbackEmailParsingOutput } from '../schemas/task.schema.js';
+import { convert } from 'html-to-text';
 
 export async function fetchEmailContent(emailAddress, messageId) {
   // Fetch email content using app-owned Gmail credentials
@@ -78,10 +79,14 @@ export async function fetchEmailContent(emailAddress, messageId) {
 
 export function truncateOriginalRequest(subject, body) {
   const MAX_LENGTH = 30000;
+  
+  // Convert HTML to plain text (removes all tags/scripts)
+  const cleanSubject = subject ? convert(subject, { wordwrap: false }) : '';
+  const cleanBody = body ? convert(body, { wordwrap: false }) : '';
+  
   let result = '';
-
-  const subjectText = subject ? `Subject: ${subject}` : '';
-  const bodyText = body || '';
+  const subjectText = cleanSubject ? `Subject: ${cleanSubject}` : '';
+  const bodyText = cleanBody || '';
 
   // Prioritize subject
   if (subjectText.length >= MAX_LENGTH) {
@@ -576,10 +581,14 @@ async function emailIngestionRoutes(fastify, options) {
 
   function truncateOriginalRequest(subject, body) {
     const MAX_LENGTH = 30000;
+    
+    // Convert HTML to plain text (removes all tags/scripts)
+    const cleanSubject = subject ? convert(subject, { wordwrap: false }) : '';
+    const cleanBody = body ? convert(body, { wordwrap: false }) : '';
+    
     let result = '';
-
-    const subjectText = subject ? `Subject: ${subject}` : '';
-    const bodyText = body || '';
+    const subjectText = cleanSubject ? `Subject: ${cleanSubject}` : '';
+    const bodyText = cleanBody || '';
 
     // Prioritize subject
     if (subjectText.length >= MAX_LENGTH) {

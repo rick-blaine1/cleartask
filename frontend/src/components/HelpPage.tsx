@@ -21,7 +21,7 @@ const HelpPage: React.FC = () => {
         <li>You can also edit, delete, and mark complete by clicking or tapping the buttons on the task cards.</li>
       </ul>
       
-      <h2>Manage Authorized Senders</h2>
+      <h2>Manage Authorized Senders / Task Creation From Emails</h2>
       <ul>
         <li>Here you can add and remove email addresses as Authorized Senders.</li>
         <li>After adding an email address, we will email that address with a magic link. Click the link in the email to confirm this email belongs to you.</li>
