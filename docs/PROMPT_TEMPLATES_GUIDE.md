@@ -210,11 +210,6 @@ export const LLM_CONFIGS = {
     model: 'gpt-4o-mini',
     timeout: 3000,
     name: 'OpenAI GPT-4'
-  },
-  OPENAI_GPT35: {
-    model: 'gpt-3.5-turbo',
-    timeout: 3000,
-    name: 'OpenAI GPT-3.5'
   }
 };
 ```
@@ -256,7 +251,7 @@ import { buildTaskSuggestionPrompt } from './promptTemplates.js';
 const prompt = buildTaskSuggestionPrompt();
 
 const response = await llmClient.chat.completions.create({
-  model: "gpt-3.5-turbo",
+  model: "gpt-4o-mini",
   messages: [{ role: "user", content: prompt }]
 });
 ```

@@ -80,7 +80,6 @@ graph TD
     Fastify --> |Auth Callback| Microsoft
     Fastify --> |Voice/Text Commands| LLM_Router(LLM Integration)
     LLM_Router --> |Primary| RequestyAI[Requesty.ai (OpenAI/GPT-4o-mini)]
-    LLM_Router --> |Fallback if RequestyAI fails| OpenAI[OpenAI (GPT-3.5-turbo)]
     LLM_Router --> |Fallback if all fail| SimpleFallback[Simple Text Fallback]
     Fastify --> CRUD[Task CRUD Operations]
     CRUD --> PG

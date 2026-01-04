@@ -67,12 +67,11 @@ ClearTask supports Gmail Push Notifications to automatically ingest emails and c
 3.  **Create OAuth 2.0 Credentials**:
     *   Go to **"APIs & Services" > "Credentials"**.
     *   Click **"+ CREATE CREDENTIALS" > "OAuth client ID"**.
-    *   Configure the OAuth consent screen if prompted (User Type: External/Internal, App Name: `ClearTask`, add your email for User support and Developer contact).
-    *   Add the scope: `https://www.googleapis.com/auth/gmail.readonly`.
+    *   Configure the OAuth consent screen if prompted (User Type: External/Internal, App Name: `ClearTask`, add your email for User support and Developer contact).    
     *   Create "OAuth client ID" of type "Web application".
     *   **Authorized redirect URIs**:
         *   `https://developers.google.com/oauthplayground`
-        *   `http://localhost:3001/auth/callback` (adjust port if needed)
+        *   `http://localhost:3000/auth/google/callback` (adjust port if needed)
     *   Copy your **Client ID** and **Client Secret**.
 
 4.  **Obtain Gmail Refresh Token**:
@@ -98,7 +97,7 @@ ClearTask supports Gmail Push Notifications to automatically ingest emails and c
     *   Enter a Subscription ID (e.g., `gmail-push-sub`).
     *   Select your topic: `gmail-push`.
     *   Delivery type: **"Push"**.
-    *   **Endpoint URL**: `https://your-domain.com/email-ingestion/webhook` (For local development, use a tunneling service like [ngrok](https://ngrok.com/) to expose your local server. e.g., `https://abc123.ngrok.io/email-ingestion/webhook`).
+    *   **Endpoint URL**: `https://your-domain.com/api/email-ingestion/webhook` (For local development, use a tunneling service like [ngrok](https://ngrok.com/) to expose your local server. e.g., `https://abc123.ngrok.io/email-ingestion/webhook`).
 
 #### Application Environment Variable Configuration for Gmail Push Notifications
 
@@ -254,6 +253,13 @@ ClearTask uses OAuth for user authentication. You'll need to set up applications
     MICROSOFT_CLIENT_ID="YOUR_MICROSOFT_CLIENT_ID"
     MICROSOFT_CLIENT_SECRET="YOUR_MICROSOFT_CLIENT_SECRET"
     ```
+5.  **API Permissions (scope)**: 
+    *   In your App Registration, click on "API permissions" in the left menu.
+    *   Check for Microsoft Graph. You should see: User.Read (Delegated)- This allows the app to sign the user in and read their basic profile
+    *   If you need the email address, click "+ Add a permission":
+        *   Select Microsoft Graph > Delegated permissions.   
+        *   Search for and check email, openid, and profile. 
+        *   Click "Add permissions" at the bottom.   
 
 ### Email Service (Resend)
 
@@ -277,7 +283,7 @@ ClearTask uses LLMs for processing natural language commands. A fallback mechani
 #### OpenAI (Fallback)
 
 *   `OPENAI_API_KEY`: Your OpenAI API key.
-*   `OPENAI_MODEL`: The OpenAI model to use (e.g., `gpt-4o-mini`). **Note: `gpt-3.5-turbo` is deprecated and should not be used.**
+*   `OPENAI_MODEL`: The OpenAI model to use (e.g., `gpt-4o-mini`). 
 
     ```dotenv
     REQUESTY_API_KEY="YOUR_REQUESTY_AI_API_KEY"
