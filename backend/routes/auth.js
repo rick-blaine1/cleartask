@@ -107,10 +107,36 @@ export default async function authRoutes(fastify, options) {
     fastify.log.info(`[${requestId}] === Microsoft OAuth Callback START ===`);
     fastify.log.info(`[${requestId}] Query params: ${JSON.stringify(request.query)}`);
     fastify.log.info(`[${requestId}] State from query: ${request.query.state?.substring(0, 8)}...`);
+    fastify.log.info(`[${requestId}] Authorization code: ${request.query.code?.substring(0, 20)}...`);
+    fastify.log.info(`[${requestId}] Callback URI configured: ${process.env.BASE_URL || 'http://localhost:3000'}/api/auth/microsoft/callback`);
+    fastify.log.info(`[${requestId}] Microsoft Client ID: ${process.env.MICROSOFT_CLIENT_ID?.substring(0, 8)}...`);
     
     try {
       fastify.log.info(`[${requestId}] Step 1: Calling getAccessTokenFromAuthorizationCodeFlow...`);
-      const tokenResult = await this.microsoftOAuth2.getAccessTokenFromAuthorizationCodeFlow(request);
+      
+      // Wrap the token exchange to catch and log detailed errors
+      let tokenResult;
+      try {
+        tokenResult = await this.microsoftOAuth2.getAccessTokenFromAuthorizationCodeFlow(request);
+      } catch (tokenError) {
+        fastify.log.error(`[${requestId}] Token exchange failed with error:`, tokenError);
+        fastify.log.error(`[${requestId}] Token error name: ${tokenError.name}`);
+        fastify.log.error(`[${requestId}] Token error message: ${tokenError.message}`);
+        
+        // Try to extract more details from the error
+        if (tokenError.data) {
+          fastify.log.error(`[${requestId}] Token error data:`, JSON.stringify(tokenError.data));
+        }
+        if (tokenError.statusCode) {
+          fastify.log.error(`[${requestId}] Token error status code: ${tokenError.statusCode}`);
+        }
+        if (tokenError.body) {
+          fastify.log.error(`[${requestId}] Token error body:`, tokenError.body);
+        }
+        
+        throw tokenError; // Re-throw to be caught by outer catch
+      }
+      
       fastify.log.info(`[${requestId}] Step 1: Token exchange successful`);
       fastify.log.debug(`[${requestId}] Token type: ${tokenResult.token?.token_type}`);
       fastify.log.debug(`[${requestId}] Access token present: ${!!tokenResult.token?.access_token}`);
