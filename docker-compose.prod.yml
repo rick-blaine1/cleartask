@@ -6,8 +6,8 @@ services:
       target: production
       args:
       # Vite bakes these in at build time
-      - VITE_APP_API_BASE_URL: ${PROD_API_URL}
-      - VITE_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+        VITE_APP_API_BASE_URL: ${PROD_API_URL}
+        VITE_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
     ports:
       - "80:80"
     restart: unless-stopped
