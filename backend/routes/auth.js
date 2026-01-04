@@ -103,36 +103,57 @@ export default async function authRoutes(fastify, options) {
       }
     }
   }, async function (request, reply) {
+    const requestId = Math.random().toString(36).substring(7);
+    fastify.log.info(`[${requestId}] === Microsoft OAuth Callback START ===`);
+    fastify.log.info(`[${requestId}] Query params: ${JSON.stringify(request.query)}`);
+    fastify.log.info(`[${requestId}] State from query: ${request.query.state?.substring(0, 8)}...`);
+    
     try {
-      const { token } = await this.microsoftOAuth2.getAccessTokenFromAuthorizationCodeFlow(request);
+      fastify.log.info(`[${requestId}] Step 1: Calling getAccessTokenFromAuthorizationCodeFlow...`);
+      const tokenResult = await this.microsoftOAuth2.getAccessTokenFromAuthorizationCodeFlow(request);
+      fastify.log.info(`[${requestId}] Step 1: Token exchange successful`);
+      fastify.log.debug(`[${requestId}] Token type: ${tokenResult.token?.token_type}`);
+      fastify.log.debug(`[${requestId}] Access token present: ${!!tokenResult.token?.access_token}`);
+      
+      const { token } = tokenResult;
       
       // Fetch the user's Microsoft profile using the access token
+      fastify.log.info(`[${requestId}] Step 2: Fetching user profile from Microsoft Graph API...`);
       const userInfoResponse = await fetch('https://graph.microsoft.com/v1.0/me', {
         headers: {
           Authorization: `Bearer ${token.access_token}`,
         },
       });
 
+      fastify.log.info(`[${requestId}] Step 2: Graph API response status: ${userInfoResponse.status}`);
+      
       if (!userInfoResponse.ok) {
         const errorBody = await userInfoResponse.text();
-        fastify.log.error(`Microsoft Graph API error response: ${errorBody}`);
+        fastify.log.error(`[${requestId}] Microsoft Graph API error response: ${errorBody}`);
         throw new Error('Failed to fetch user info from Microsoft Graph API');
       }
 
       const microsoftUserProfile = await userInfoResponse.json();
+      fastify.log.info(`[${requestId}] Step 2: User profile fetched successfully`);
+      fastify.log.debug(`[${requestId}] User profile: ${JSON.stringify(microsoftUserProfile)}`);
 
       // Extract relevant user info
       const userId = `microsoft-${microsoftUserProfile.id}`; // Prefix to avoid collisions
       const email = microsoftUserProfile.mail || microsoftUserProfile.userPrincipalName; // Get email
       const name = microsoftUserProfile.displayName;
 
+      fastify.log.info(`[${requestId}] Step 3: Extracted user info - userId: ${userId}, email: ${email}, name: ${name}`);
+
       // Check if email is whitelisted
+      fastify.log.info(`[${requestId}] Step 4: Checking email whitelist...`);
       if (!isEmailWhitelisted(email, invitedUsers)) {
-        fastify.log.warn(`Login attempt from non-whitelisted email: ${email}`);
+        fastify.log.warn(`[${requestId}] Login attempt from non-whitelisted email: ${email}`);
         return reply.redirect(`${process.env.FRONTEND_URL || 'http://localhost:5173'}/#error=access_denied`);
       }
+      fastify.log.info(`[${requestId}] Step 4: Email is whitelisted`);
 
       // Database operations
+      fastify.log.info(`[${requestId}] Step 5: Storing user in database...`);
       const client = await pool.connect();
       try {
         await client.query(
@@ -142,16 +163,20 @@ export default async function authRoutes(fastify, options) {
            SET email = EXCLUDED.email, name = EXCLUDED.name`,
           [userId, email, name]
         );
+        fastify.log.info(`[${requestId}] Step 5: User stored successfully`);
       } catch (dbError) {
-        fastify.log.error('Error storing Microsoft user info:', dbError);
+        fastify.log.error(`[${requestId}] Error storing Microsoft user info:`, dbError);
       } finally {
         client.release();
       }
 
       // Generate and sign our custom JWT
+      fastify.log.info(`[${requestId}] Step 6: Generating JWT...`);
       const ourJwt = fastify.jwt.sign({ userId });
+      fastify.log.info(`[${requestId}] Step 6: JWT generated successfully`);
 
       // Set JWT in httpOnly cookie instead of URL
+      fastify.log.info(`[${requestId}] Step 7: Setting JWT cookie...`);
       reply.setCookie('jwt', ourJwt, {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
@@ -159,13 +184,26 @@ export default async function authRoutes(fastify, options) {
         maxAge: 7 * 24 * 60 * 60, // 7 days in seconds
         path: '/'
       });
+      fastify.log.info(`[${requestId}] Step 7: JWT cookie set (secure: ${process.env.NODE_ENV === 'production'})`);
 
       // Redirect to frontend with success indicator
-      reply.redirect(`${process.env.FRONTEND_URL || 'http://localhost:5173'}/#login=success`);
+      const redirectUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/#login=success`;
+      fastify.log.info(`[${requestId}] Step 8: Redirecting to: ${redirectUrl}`);
+      reply.redirect(redirectUrl);
+      fastify.log.info(`[${requestId}] === Microsoft OAuth Callback SUCCESS ===`);
 
     } catch (error) {
-      fastify.log.error('Microsoft OAuth callback error:', error.message);
-      fastify.log.error('Microsoft OAuth callback stack:', error.stack);
+      fastify.log.error(`[${requestId}] === Microsoft OAuth Callback FAILED ===`);
+      fastify.log.error(`[${requestId}] Error name: ${error.name}`);
+      fastify.log.error(`[${requestId}] Error message: ${error.message}`);
+      fastify.log.error(`[${requestId}] Error stack:`, error.stack);
+      
+      // Log additional error details if available
+      if (error.response) {
+        fastify.log.error(`[${requestId}] Error response status: ${error.response.status}`);
+        fastify.log.error(`[${requestId}] Error response data:`, error.response.data);
+      }
+      
       reply.status(500).send({ error: 'Microsoft OAuth callback failed' });
     }
   });

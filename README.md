@@ -97,7 +97,7 @@ ClearTask supports Gmail Push Notifications to automatically ingest emails and c
     *   Enter a Subscription ID (e.g., `gmail-push-sub`).
     *   Select your topic: `gmail-push`.
     *   Delivery type: **"Push"**.
-    *   **Endpoint URL**: `https://your-domain.com/api/email-ingestion/webhook` (For local development, use a tunneling service like [ngrok](https://ngrok.com/) to expose your local server. e.g., `https://abc123.ngrok.io/email-ingestion/webhook`).
+    *   **Endpoint URL**: `https://your-domain.com/email-ingestion/webhook` (For local development, use a tunneling service like [ngrok](https://ngrok.com/) to expose your local server. e.g., `https://abc123.ngrok.io/email-ingestion/webhook`).
 
 #### Application Environment Variable Configuration for Gmail Push Notifications
 
@@ -258,7 +258,7 @@ ClearTask uses OAuth for user authentication. You'll need to set up applications
     *   Check for Microsoft Graph. You should see: User.Read (Delegated)- This allows the app to sign the user in and read their basic profile
     *   If you need the email address, click "+ Add a permission":
         *   Select Microsoft Graph > Delegated permissions.   
-        *   Search for and check email, openid, and profile. 
+        *   Search for and check email, openid, offline_access, and profile. 
         *   Click "Add permissions" at the bottom.   
 
 ### Email Service (Resend)

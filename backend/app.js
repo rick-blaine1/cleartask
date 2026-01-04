@@ -96,35 +96,45 @@ function buildApp() {
       // Store state with timestamp for expiration checking
       oauthStateStore.set(state, { timestamp: Date.now() });
       
-      fastify.log.debug(`Generated OAuth state: ${state.substring(0, 8)}...`);
+      fastify.log.info(`[OAuth State] Generated new state: ${state.substring(0, 8)}... (store size: ${oauthStateStore.size})`);
+      fastify.log.debug(`[OAuth State] Full state value: ${state}`);
       return state;
     },
     checkStateFunction: (request, callback) => {
       const state = request.query.state;
       
+      fastify.log.info(`[OAuth State] Checking state: ${state?.substring(0, 8)}... (store size: ${oauthStateStore.size})`);
+      
       if (!state) {
-        fastify.log.warn('OAuth callback missing state parameter');
+        fastify.log.warn('[OAuth State] OAuth callback missing state parameter');
         return callback(new Error('Missing state parameter'));
       }
+      
+      // Log all states in store for debugging
+      const storeKeys = Array.from(oauthStateStore.keys()).map(k => k.substring(0, 8));
+      fastify.log.debug(`[OAuth State] States in store: ${JSON.stringify(storeKeys)}`);
       
       const stored = oauthStateStore.get(state);
       
       if (!stored) {
-        fastify.log.warn(`OAuth state not found or already used: ${state.substring(0, 8)}...`);
+        fastify.log.warn(`[OAuth State] State not found or already used: ${state.substring(0, 8)}...`);
+        fastify.log.warn(`[OAuth State] This could indicate: 1) Container restart, 2) Load balancer routing to different instance, 3) State already consumed by previous request`);
         return callback(new Error('Invalid state'));
       }
       
       // Check state hasn't expired (5 minutes = 300000ms)
       const age = Date.now() - stored.timestamp;
+      fastify.log.info(`[OAuth State] State age: ${age}ms (max: 300000ms)`);
+      
       if (age > 300000) {
         oauthStateStore.delete(state);
-        fastify.log.warn(`OAuth state expired (age: ${age}ms): ${state.substring(0, 8)}...`);
+        fastify.log.warn(`[OAuth State] State expired (age: ${age}ms): ${state.substring(0, 8)}...`);
         return callback(new Error('State expired'));
       }
       
       // State is valid - remove it (one-time use)
       oauthStateStore.delete(state);
-      fastify.log.debug(`OAuth state validated and consumed: ${state.substring(0, 8)}...`);
+      fastify.log.info(`[OAuth State] State validated and consumed: ${state.substring(0, 8)}... (store size after deletion: ${oauthStateStore.size})`);
       callback();
     },
   });
