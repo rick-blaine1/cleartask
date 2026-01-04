@@ -30,7 +30,10 @@ services:
       - NODE_ENV=production
       - DB_HOST=db
       - DB_PORT=5432
-      - FRONTEND_URL=${PROD_FRONTEND_URL}   
+      - FRONTEND_URL=${PROD_FRONTEND_URL}  
+      - DB_NAME=cleartaskdb
+      - DB_USER=${POSTGRES_USER}
+      - DB_PASSWORD=${POSTGRES_PASSWORD}       
     logging:
       driver: "json-file"
       options:
