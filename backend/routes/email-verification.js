@@ -58,11 +58,62 @@ export default async function emailVerificationRoutes(fastify, options) {
       fastify.log.info(`Magic link for ${email}: ${magicLink}`);
       
       try {
+        const emailHtml = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Verify Your Email Address</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f5f5f5;">
+  <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: #f5f5f5;">
+    <tr>
+      <td align="center" style="padding: 40px 20px;">
+        <table role="presentation" style="max-width: 600px; width: 100%; border-collapse: collapse; background-color: #ffffff; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+          <tr>
+            <td style="padding: 40px 30px;">
+              <h1 style="margin: 0 0 24px 0; font-size: 24px; font-weight: 600; color: #1a1a1a; line-height: 1.3;">
+                Verify Your Email Address
+              </h1>
+              <p style="margin: 0 0 24px 0; font-size: 16px; line-height: 1.6; color: #333333;">
+                Thank you for signing up! To complete your registration and start using our service, please verify your email address by clicking the button below.
+              </p>
+              <table role="presentation" style="width: 100%; border-collapse: collapse;">
+                <tr>
+                  <td align="center" style="padding: 0 0 24px 0;">
+                    <a href="${magicLink}"
+                       style="display: inline-block; padding: 14px 32px; background-color: #007bff; color: #ffffff; text-decoration: none; border-radius: 6px; font-size: 16px; font-weight: 600; text-align: center;"
+                       role="button"
+                       aria-label="Verify your email address">
+                      Verify Email Address
+                    </a>
+                  </td>
+                </tr>
+              </table>
+              <p style="margin: 0 0 16px 0; font-size: 14px; line-height: 1.6; color: #666666;">
+                If the button above doesn't work, you can copy and paste this link into your browser:
+              </p>
+              <p style="margin: 0 0 24px 0; font-size: 14px; line-height: 1.6; color: #007bff; word-break: break-all;">
+                ${magicLink}
+              </p>
+              <hr style="border: none; border-top: 1px solid #e0e0e0; margin: 24px 0;">
+              <p style="margin: 0; font-size: 13px; line-height: 1.6; color: #999999;">
+                This verification link will expire in ${EMAIL_VERIFICATION_TOKEN_EXPIRATION_HOURS} hours. If you didn't request this email, you can safely ignore it.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
         await sendTransactionalEmail(
-          pool, 
-          email, 
-          'Verify your email address', 
-          `<p>Click <a href=\"${magicLink}\">here</a> to verify your email address.</p>`,
+          pool,
+          email,
+          'Verify your email address',
+          emailHtml,
           'magic_link_verification'
         );
         reply.status(200).send({ message: 'Magic link sent to your email address.' });
@@ -190,11 +241,62 @@ export default async function emailVerificationRoutes(fastify, options) {
       
       try {
         fastify.log.info(`[ADD-SENDER] Attempting to send verification email to ${email}`);
+        const emailHtml = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Verify Authorized Sender Email</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f5f5f5;">
+  <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: #f5f5f5;">
+    <tr>
+      <td align="center" style="padding: 40px 20px;">
+        <table role="presentation" style="max-width: 600px; width: 100%; border-collapse: collapse; background-color: #ffffff; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+          <tr>
+            <td style="padding: 40px 30px;">
+              <h1 style="margin: 0 0 24px 0; font-size: 24px; font-weight: 600; color: #1a1a1a; line-height: 1.3;">
+                Verify Authorized Sender Email
+              </h1>
+              <p style="margin: 0 0 24px 0; font-size: 16px; line-height: 1.6; color: #333333;">
+                You've added this email address as an authorized sender. To complete the setup and allow this email to create tasks, please verify it by clicking the button below.
+              </p>
+              <table role="presentation" style="width: 100%; border-collapse: collapse;">
+                <tr>
+                  <td align="center" style="padding: 0 0 24px 0;">
+                    <a href="${magicLink}"
+                       style="display: inline-block; padding: 14px 32px; background-color: #007bff; color: #ffffff; text-decoration: none; border-radius: 6px; font-size: 16px; font-weight: 600; text-align: center;"
+                       role="button"
+                       aria-label="Verify authorized sender email">
+                      Verify Email Address
+                    </a>
+                  </td>
+                </tr>
+              </table>
+              <p style="margin: 0 0 16px 0; font-size: 14px; line-height: 1.6; color: #666666;">
+                If the button above doesn't work, you can copy and paste this link into your browser:
+              </p>
+              <p style="margin: 0 0 24px 0; font-size: 14px; line-height: 1.6; color: #007bff; word-break: break-all;">
+                ${magicLink}
+              </p>
+              <hr style="border: none; border-top: 1px solid #e0e0e0; margin: 24px 0;">
+              <p style="margin: 0; font-size: 13px; line-height: 1.6; color: #999999;">
+                This verification link will expire in ${EMAIL_VERIFICATION_TOKEN_EXPIRATION_HOURS} hours. If you didn't request this email, you can safely ignore it.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
         await sendTransactionalEmail(
           pool,
           email,
           'Verify your authorized sender email',
-          `<p>Click <a href="${magicLink}">here</a> to verify this email address as an authorized sender.</p>`,
+          emailHtml,
           'sender_verification'
         );
         fastify.log.info(`[ADD-SENDER] Verification email sent successfully`);
@@ -306,11 +408,62 @@ export default async function emailVerificationRoutes(fastify, options) {
       
       try {
         fastify.log.info(`[RESEND-VERIFICATION] Calling sendTransactionalEmail for ${email_address}`);
+        const emailHtml = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Verify Authorized Sender Email</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f5f5f5;">
+  <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: #f5f5f5;">
+    <tr>
+      <td align="center" style="padding: 40px 20px;">
+        <table role="presentation" style="max-width: 600px; width: 100%; border-collapse: collapse; background-color: #ffffff; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+          <tr>
+            <td style="padding: 40px 30px;">
+              <h1 style="margin: 0 0 24px 0; font-size: 24px; font-weight: 600; color: #1a1a1a; line-height: 1.3;">
+                Verify Authorized Sender Email
+              </h1>
+              <p style="margin: 0 0 24px 0; font-size: 16px; line-height: 1.6; color: #333333;">
+                You've requested a new verification link for this email address. To complete the setup and allow this email to create tasks, please verify it by clicking the button below.
+              </p>
+              <table role="presentation" style="width: 100%; border-collapse: collapse;">
+                <tr>
+                  <td align="center" style="padding: 0 0 24px 0;">
+                    <a href="${magicLink}"
+                       style="display: inline-block; padding: 14px 32px; background-color: #007bff; color: #ffffff; text-decoration: none; border-radius: 6px; font-size: 16px; font-weight: 600; text-align: center;"
+                       role="button"
+                       aria-label="Verify authorized sender email">
+                      Verify Email Address
+                    </a>
+                  </td>
+                </tr>
+              </table>
+              <p style="margin: 0 0 16px 0; font-size: 14px; line-height: 1.6; color: #666666;">
+                If the button above doesn't work, you can copy and paste this link into your browser:
+              </p>
+              <p style="margin: 0 0 24px 0; font-size: 14px; line-height: 1.6; color: #007bff; word-break: break-all;">
+                ${magicLink}
+              </p>
+              <hr style="border: none; border-top: 1px solid #e0e0e0; margin: 24px 0;">
+              <p style="margin: 0; font-size: 13px; line-height: 1.6; color: #999999;">
+                This verification link will expire in ${EMAIL_VERIFICATION_TOKEN_EXPIRATION_HOURS} hours. If you didn't request this email, you can safely ignore it.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
         await sendTransactionalEmail(
           pool,
           email_address,
           'Verify your authorized sender email',
-          `<p>Click <a href="${magicLink}">here</a> to verify this email address as an authorized sender.</p>`,
+          emailHtml,
           'sender_verification_resend'
         );
         fastify.log.info(`[RESEND-VERIFICATION] Email sent successfully to ${email_address}`);

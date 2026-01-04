@@ -119,19 +119,37 @@ export default async function authRoutes(fastify, options) {
       try {
         tokenResult = await this.microsoftOAuth2.getAccessTokenFromAuthorizationCodeFlow(request);
       } catch (tokenError) {
-        fastify.log.error(`[${requestId}] Token exchange failed with error:`, tokenError);
-        fastify.log.error(`[${requestId}] Token error name: ${tokenError.name}`);
+        fastify.log.error(`[${requestId}] Token exchange failed with error name: ${tokenError.name}`);
         fastify.log.error(`[${requestId}] Token error message: ${tokenError.message}`);
         
-        // Try to extract more details from the error
+        // Try to extract more details from the error (avoid circular JSON)
         if (tokenError.data) {
-          fastify.log.error(`[${requestId}] Token error data:`, JSON.stringify(tokenError.data));
+          try {
+            fastify.log.error(`[${requestId}] Token error data: ${JSON.stringify(tokenError.data)}`);
+          } catch (e) {
+            fastify.log.error(`[${requestId}] Token error data (non-serializable):`, tokenError.data);
+          }
         }
         if (tokenError.statusCode) {
           fastify.log.error(`[${requestId}] Token error status code: ${tokenError.statusCode}`);
         }
         if (tokenError.body) {
-          fastify.log.error(`[${requestId}] Token error body:`, tokenError.body);
+          try {
+            const bodyStr = typeof tokenError.body === 'string' ? tokenError.body : JSON.stringify(tokenError.body);
+            fastify.log.error(`[${requestId}] Token error body: ${bodyStr}`);
+          } catch (e) {
+            fastify.log.error(`[${requestId}] Token error body (non-serializable)`);
+          }
+        }
+        if (tokenError.response) {
+          fastify.log.error(`[${requestId}] Token error response status: ${tokenError.response.status}`);
+          if (tokenError.response.data) {
+            try {
+              fastify.log.error(`[${requestId}] Token error response data: ${JSON.stringify(tokenError.response.data)}`);
+            } catch (e) {
+              fastify.log.error(`[${requestId}] Token error response data (non-serializable)`);
+            }
+          }
         }
         
         throw tokenError; // Re-throw to be caught by outer catch
