@@ -343,7 +343,7 @@
 }
 
 
-/* Existing .beta-info-box styles to modify */
+/* Beta info box styles - text size matches regular text */
 .beta-info-box {
   background-color: #333;
   color: #fff;
@@ -352,36 +352,36 @@
   padding: 15px;
   margin-top: 20px;
   text-align: left;
-  font-size: 1.1em; /* Suggested change: Increase base font size */
+  font-size: 1rem; /* Match base font size (24px) */
 }
 
 .beta-info-box p {
-  margin-bottom: 8px; /* Suggested change: Slightly increased margin for better spacing */
-  line-height: 1.6; /* Suggested change: Increased line height for readability */
-  font-size: 1.0em; /* Suggested change: Ensure paragraph text is also larger relative to its parent */
+  margin-bottom: 8px;
+  line-height: 1.5; /* Match base line height */
+  font-size: 1rem; /* Match base font size (24px) */
 }
 
-/* Suggested additions for mobile responsiveness of font sizes */
+/* Mobile responsiveness - maintain consistent font size */
 @media (max-width: 768px) {
   .beta-info-box {
-    padding: 1rem; /* Adjust padding for smaller screens */
-    margin-top: 1rem; /* Adjust margin for smaller screens */
-    font-size: 1em; /* Further adjust font size on tablets/smaller desktops */
+    padding: 1rem;
+    margin-top: 1rem;
+    font-size: 1rem; /* Keep consistent with base font size */
   }
 
   .beta-info-box p {
-    font-size: 0.9em; /* Adjust paragraph font size on tablets/smaller desktops */
+    font-size: 1rem; /* Keep consistent with base font size */
   }
 }
 
 @media (max-width: 480px) {
   .beta-info-box {
-    padding: 0.8rem; /* Even smaller padding for very small screens */
-    font-size: 0.9em; /* Smaller font size for mobile phones */
+    padding: 0.8rem;
+    font-size: 1rem; /* Keep consistent with base font size */
   }
 
   .beta-info-box p {
-    font-size: 0.85em; /* Adjust paragraph font size on mobile phones */
+    font-size: 1rem; /* Keep consistent with base font size */
   }
 }
 

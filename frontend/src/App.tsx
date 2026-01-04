@@ -654,12 +654,14 @@ function App() {
           </>
         ) : (
           <>
-            <button onClick={handleGoogleLogin}>
-              Login with Google
-            </button>
-            <button onClick={handleMicrosoftLogin}>
-              Login with Microsoft
-            </button>
+            <div className="main-nav">
+              <button onClick={handleGoogleLogin} className="nav-button">
+                Login with Google
+              </button>
+              <button onClick={handleMicrosoftLogin} className="nav-button">
+                Login with Microsoft
+              </button>
+            </div>
             {!isLoggedIn && (
               <div className="beta-info-box">
                 <p>This app is still in beta</p>
