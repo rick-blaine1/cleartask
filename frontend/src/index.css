@@ -115,12 +115,8 @@ button:focus-visible {
   }
 }
 
-/* Support for 200% text magnification */
-@media (min-resolution: 2dppx) {
-  :root {
-    font-size: calc(var(--base-font-size) * 0.9);
-  }
-}
+/* Support for 200% text magnification - removed to maintain consistent font size on mobile */
+/* The previous media query was reducing font size on high-resolution mobile displays */
 
 .task-list {
   display: flex;

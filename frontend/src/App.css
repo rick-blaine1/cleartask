@@ -155,6 +155,19 @@
   align-items: center;
 }
 
+/* Mobile responsive styles for main navigation */
+@media (max-width: 768px) {
+  .main-nav {
+    flex-direction: column;
+    width: 100%;
+  }
+  
+  .main-nav .nav-button {
+    width: 100%;
+    min-height: var(--min-tap-target);
+  }
+}
+
 .nav-button {
   border-radius: 8px;
   border: 2px solid var(--text-primary);
