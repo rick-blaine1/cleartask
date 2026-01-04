@@ -663,7 +663,7 @@ function App() {
               </button>
             </div>
             {!isLoggedIn && (
-              <div className="beta-info-box">
+              <div style={{ textAlign: 'left' }}>
                 <p>This app is still in beta</p>
                 <p>Only invited users have access. If you'd like to be invited, contact the Administrator</p>
                 <p>The administrator will have access to view any emails sent to the app's email</p>
