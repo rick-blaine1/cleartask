@@ -33,7 +33,7 @@ This guide will walk you through setting up and deploying ClearTask using Docker
 
 1.  **Clone the Repository**:
     ```bash
-    git clone https://github.com/your-username/cleartask.git
+    git clone https://github.com/rick-blaine1/cleartask.git
     cd cleartask
     ```
 
