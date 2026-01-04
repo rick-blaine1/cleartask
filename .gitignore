@@ -19,6 +19,7 @@ dist
 dist-ssr
 *.local
 docs/SECURITY_REVIEW.MD
+docs/Location_Translation_Table.MD
 
 # Environment variables
 .env
