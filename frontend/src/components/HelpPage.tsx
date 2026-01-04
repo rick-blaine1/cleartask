@@ -24,8 +24,8 @@ const HelpPage: React.FC = () => {
       <h2>Manage Authorized Senders / Task Creation From Emails</h2>
       <ul>
         <li>Here you can add and remove email addresses as Authorized Senders.</li>
-        <li>After adding an email address, we will email that address with a magic link. Click the link in the email to confirm this email belongs to you.</li>
-        <li>Once authorized, when you forward or send an email from one of these addresses to <strong>[YOUR APP EMAIL HERE]</strong>, one or more tasks will be created based on the email you send.</li>
+        <li>After adding an email address, we will email that address with a magic link. Click the link in the email to confirm this email belongs to you. Check your spam folder if you don't see the email come in.</li>
+        <li>Once authorized, when you forward or send an email from one of these addresses to <strong>[YOUR APP EMAIL HERE]</strong>, one or more tasks will be created based on the email you send.</li>        
       </ul>
     </div>
   );
