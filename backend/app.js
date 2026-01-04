@@ -233,7 +233,7 @@ function buildApp() {
   fastify.register(authRoutes, { pool, invitedUsers });
   fastify.register(taskRoutes, { pool, openai, requesty, llmLogger });
   fastify.register(emailVerificationRoutes, { pool });
-  fastify.register(emailIngestionRoutes, { pool, openai, requesty, llmLogger });
+  fastify.register(emailIngestionRoutes, { prefix: '/api', pool, openai, requesty, llmLogger });
 
   // Root endpoint
   fastify.get('/', async (request, reply) => {

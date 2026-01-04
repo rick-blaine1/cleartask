@@ -141,8 +141,25 @@ async function emailIngestionRoutes(fastify, options) {
     reply.send({ message: `Authorized sender ${id} retrieved successfully.`, data: dummyAuthorizedSender });
   });
 
+  // Health check endpoint for webhook
+  fastify.get('/email-ingestion/webhook/health', async (request, reply) => {
+    fastify.log.info('Webhook health check endpoint hit');
+    reply.send({
+      status: 'ok',
+      message: 'Webhook endpoint is accessible',
+      timestamp: new Date().toISOString(),
+      appEmail: process.env.GMAIL_APP_EMAIL,
+      pubsubTopic: process.env.GCP_PUBSUB_TOPIC_NAME
+    });
+  });
+
   // Gmail push notification webhook for app's monitored email account
   fastify.post('/email-ingestion/webhook', async (request, reply) => {
+    fastify.log.info('=== GMAIL WEBHOOK ENDPOINT HIT ===');
+    fastify.log.info(`Timestamp: ${new Date().toISOString()}`);
+    fastify.log.info(`Request body: ${JSON.stringify(request.body)}`);
+    fastify.log.info(`Request headers: ${JSON.stringify(request.headers)}`);
+    
     try {
       const { message } = request.body;
       if (!message || !message.data) {
