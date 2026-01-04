@@ -216,7 +216,7 @@ email_address VARCHAR(255) NOT NULL,
   await client.query(`
     CREATE TABLE IF NOT EXISTS gmail_sync_state (
       id SERIAL PRIMARY KEY,
-email_address VARCHAR(255) NOT NULL,
+      email_address VARCHAR(255) NOT NULL UNIQUE,
       history_id VARCHAR(255) NOT NULL,
       watch_expiration TIMESTAMP WITH TIME ZONE,
       updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
@@ -227,6 +227,23 @@ email_address VARCHAR(255) NOT NULL,
   logger.info('Creating gmail_sync_state index...');
   await client.query(`CREATE INDEX IF NOT EXISTS idx_gmail_sync_state_email ON gmail_sync_state (email_address);`);
   logger.info('Gmail sync state index created successfully');
+  
+  // Add UNIQUE constraint to email_address if it doesn't exist (for existing databases)
+  logger.info('Adding UNIQUE constraint to gmail_sync_state.email_address if it doesn\'t exist...');
+  await client.query(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'gmail_sync_state_email_address_key'
+      ) THEN
+        ALTER TABLE gmail_sync_state
+        ADD CONSTRAINT gmail_sync_state_email_address_key
+        UNIQUE (email_address);
+      END IF;
+    END $$;
+  `);
+  logger.info('UNIQUE constraint on gmail_sync_state.email_address ensured');
 
   logger.info('Database schema initialized successfully');
 }
