@@ -1,11 +1,10 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import TaskCard from './components/TaskCard';
 import AuthorizedSenders from './components/AuthorizedSenders';
 import MagicLinkSuccess from './components/MagicLinkSuccess';
 import HelpPage from './components/HelpPage';
 import VerifyEmail from './components/VerifyEmail';
 import type { Task } from './db';
-import { db } from './db';
 import { speak, speakTaskCreated, speakAmbiguousInput, speakTaskUpdated } from './tts';
 import { Routes, Route, NavLink, useLocation } from 'react-router-dom';
 import './App.css';
@@ -32,7 +31,6 @@ function App() {
   const [isUILocked, setIsUILocked] = useState<boolean>(false); // State for UI lock
   const [isListening, setIsListening] = useState<boolean>(false);
   const [isAwaitingDeleteConfirmation, setIsAwaitingDeleteConfirmation] = useState<boolean>(false); // New state to track if awaiting delete confirmation
-  const [transcript, setTranscript] = useState<string>('');
   const [authError, setAuthError] = useState<string | null>(null);
   const recognitionRef = useRef<any>(null);
   const location = useLocation();
@@ -273,8 +271,6 @@ function App() {
             speakAmbiguousInput();
           }
         }
-        
-        setTranscript(''); // Clear the transcript input
       } else if (response.ok) {
         const taskData = await response.json();
 
@@ -290,8 +286,6 @@ function App() {
           )));
           speakTaskUpdated();
         }
-
-        setTranscript(''); // Clear the transcript input
       } else {
         const errorData = await response.json();
         devError('Failed to send voice transcript to backend, status:', response.status, 'error:', errorData);
@@ -313,7 +307,6 @@ function App() {
 
       recognitionRef.current.onstart = () => {
         setIsListening(true);
-        setTranscript(''); // Clear previous transcript on new start
         playAudioFeedback(800, 100); // Higher tone for start
         triggerHapticFeedback(50);
       };
@@ -324,7 +317,7 @@ function App() {
         triggerHapticFeedback(100);
       };
 
-      recognitionRef.current.onerror = (event: any) => {
+      recognitionRef.current.onerror = () => {
         setIsListening(false);
         speakAmbiguousInput();
       };
@@ -339,7 +332,6 @@ function App() {
 
     recognitionRef.current.onresult = (event: any) => {
       const speechResult = event.results[0][0].transcript;
-      setTranscript(speechResult);
 
       // Stop listening immediately to prevent feedback loops and capture of TTS
       stopListening();

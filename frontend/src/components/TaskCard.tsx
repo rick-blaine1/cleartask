@@ -1,11 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import type { Task } from '../db';
-import { speakDeleteConfirmationPrompt } from '../tts';
 
 interface TaskCardProps {
   task: Task;
   onToggleComplete?: (task: Task) => void;
-  onEdit?: (taskId: string) => void;
   onDelete?: (taskId: string) => void;
   onInitiateDeleteConfirmation: (task: Task) => void; // New prop for delete confirmation
   onCancelDelete: () => void; // New prop for canceling delete confirmation
@@ -17,7 +15,6 @@ interface TaskCardProps {
 const TaskCard: React.FC<TaskCardProps> = ({
   task,
   onToggleComplete,
-  onEdit,
   onDelete,
   onInitiateDeleteConfirmation,
   onCancelDelete,

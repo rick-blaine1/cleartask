@@ -32,7 +32,9 @@ describe('IndexedDB Sync Tests', () => {
   const newTask: Task = {
     user_id: 'test-user',
     task_name: 'Test Task Offline',
+    title: 'Test Task Offline',
     due_date: null,
+    date: new Date().toISOString(),
     is_completed: false,
     original_request: 'Create a test task offline',
   };

@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
 
 interface AuthorizedSender {
   id: string;
@@ -8,7 +7,6 @@ interface AuthorizedSender {
 }
 
 const AuthorizedSenders: React.FC = () => {
-  const navigate = useNavigate();
   const [emailInput, setEmailInput] = useState<string>('');
   const [authorizedSenders, setAuthorizedSenders] = useState<AuthorizedSender[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
